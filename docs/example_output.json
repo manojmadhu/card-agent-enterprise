@@ -1,0 +1,219 @@
+{
+  "schema_version": "2.0",
+  "request_id": "demo-001",
+  "status": "ACCEPT",
+  "reasons": [],
+  "card": {
+    "family": "ae.esaad",
+    "family_name": "Esaad",
+    "country": "AE",
+    "issuer": "Esaad",
+    "family_confidence": 0.695,
+    "variant": "classic",
+    "variant_name": "Esaad Classic",
+    "variant_confidence": 0.756
+  },
+  "fields": {
+    "holder_name": {
+      "value": "SARA AL MANSOORI",
+      "confidence": 0.937,
+      "source": "ocr_roi",
+      "valid_format": true,
+      "valid_until": null
+    },
+    "card_number": {
+      "value": "104455667788",
+      "confidence": 0.96,
+      "source": "ocr_roi",
+      "valid_format": true,
+      "valid_until": null
+    },
+    "emirates_id": {
+      "value": "784-1990-1234567-1",
+      "confidence": 0.78,
+      "source": "ocr_roi",
+      "valid_format": true,
+      "valid_until": null
+    },
+    "expiry_date": {
+      "value": "12/27",
+      "confidence": 0.95,
+      "source": "ocr_roi",
+      "valid_format": true,
+      "valid_until": "2027-12-31"
+    }
+  },
+  "validation": [
+    {
+      "rule": "regex",
+      "field": "card_number",
+      "critical": true,
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "rule": "regex",
+      "field": "holder_name",
+      "critical": false,
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "rule": "emirates_id_format",
+      "field": "emirates_id",
+      "critical": false,
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "rule": "not_expired",
+      "field": "expiry_date",
+      "critical": true,
+      "result": "pass",
+      "detail": "valid_until=2027-12-31"
+    },
+    {
+      "rule": "prefix_matches_variant",
+      "field": "card_number",
+      "critical": false,
+      "result": "pass",
+      "detail": null
+    },
+    {
+      "rule": "lookup",
+      "field": "card_number",
+      "critical": false,
+      "result": "skip",
+      "detail": "NO_VERIFIER"
+    }
+  ],
+  "quality": {
+    "width": 1600,
+    "height": 1200,
+    "blur": 339.8,
+    "brightness": 0.382,
+    "glare_ratio": 0.0146,
+    "passed": true,
+    "issues": [],
+    "card_detected": true,
+    "detector": "colour",
+    "rotation": 0,
+    "aligned_to_reference": true
+  },
+  "candidates": {
+    "family": [
+      {
+        "id": "ae.esaad",
+        "score": 0.695,
+        "signals": {
+          "text": 1.0,
+          "embed": 0.717,
+          "geometry": 0.235,
+          "colour": 0.808
+        }
+      },
+      {
+        "id": "sa.demo24",
+        "score": 0.163,
+        "signals": {
+          "text": 0.0,
+          "embed": 0.413,
+          "geometry": 0.0,
+          "colour": 0.808
+        }
+      },
+      {
+        "id": "kw.demo20",
+        "score": 0.162,
+        "signals": {
+          "text": 0.0,
+          "embed": 0.405,
+          "geometry": 0.0,
+          "colour": 0.808
+        }
+      },
+      {
+        "id": "bh.demo27",
+        "score": 0.157,
+        "signals": {
+          "text": 0.0,
+          "embed": 0.382,
+          "geometry": 0.0,
+          "colour": 0.808
+        }
+      },
+      {
+        "id": "qa.demo19",
+        "score": 0.157,
+        "signals": {
+          "text": 0.0,
+          "embed": 0.379,
+          "geometry": 0.0,
+          "colour": 0.808
+        }
+      }
+    ],
+    "variant": [
+      {
+        "id": "classic",
+        "score": 0.756,
+        "signals": {
+          "colour": 0.747,
+          "keyword": 1.0,
+          "geometry": 0.235,
+          "embed": 0.717,
+          "prefix": 1.0
+        }
+      },
+      {
+        "id": "privilege",
+        "score": 0.035,
+        "signals": {
+          "colour": 0.013,
+          "keyword": 0.0,
+          "geometry": 0.0,
+          "embed": 0.303,
+          "prefix": 0.0
+        }
+      },
+      {
+        "id": "platinum",
+        "score": 0.011,
+        "signals": {
+          "colour": 0.027,
+          "keyword": 0.0,
+          "geometry": 0.0,
+          "embed": 0.0,
+          "prefix": 0.0
+        }
+      },
+      {
+        "id": "gold",
+        "score": 0.002,
+        "signals": {
+          "colour": 0.004,
+          "keyword": 0.0,
+          "geometry": 0.0,
+          "embed": 0.0,
+          "prefix": 0.0
+        }
+      }
+    ]
+  },
+  "model_versions": {
+    "pipeline": "1.0.0",
+    "registry": "ce342f576fe6b276",
+    "embedder": "classic-lab-hog-v1",
+    "ocr": "tesseract-5.3.4"
+  },
+  "timings_ms": {
+    "quality": 8,
+    "normalise": 21,
+    "ocr_full": 391,
+    "features": 16,
+    "identify": 473,
+    "extract": 725,
+    "rules": 0
+  },
+  "processing_ms": 1650
+}

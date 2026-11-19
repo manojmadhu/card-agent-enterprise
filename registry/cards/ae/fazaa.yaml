@@ -1,0 +1,26 @@
+# Layout, colours and number formats are PLACEHOLDERS — calibrate with real, consented samples.
+id: ae.fazaa
+country: AE
+issuer: Fazaa
+name: Fazaa
+schema_version: 1
+keywords: [FAZAA, FAZA, فزعة]
+negative_keywords: [ESAAD, إسعاد]
+
+variants:
+  - {id: silver,   name: Fazaa Silver,   body_color_rgb: [192, 194, 198], keywords: [SILVER, فضية],      number_prefix: "1"}
+  - {id: gold,     name: Fazaa Gold,     body_color_rgb: [201, 162, 39],  keywords: [GOLD, ذهبية],       number_prefix: "2"}
+  - {id: platinum, name: Fazaa Platinum, body_color_rgb: [58, 60, 66],    keywords: [PLATINUM, بلاتينية], number_prefix: "3"}
+
+# roi = [x0, y0, x1, y1] as fractions of the REFERENCE image (cards are aligned to it first)
+fields:
+  - {name: holder_name, roi: [0.05, 0.55, 0.75, 0.68], regex: "[A-Z][A-Z .'-]{2,40}", normalise: upper}
+  - {name: card_number, roi: [0.05, 0.40, 0.75, 0.54], regex: "\\d{10}", normalise: digits}
+  - {name: expiry_date, roi: [0.05, 0.72, 0.50, 0.86], regex: "(0[1-9]|1[0-2])/(\\d{2}|\\d{4})", normalise: date_mm_yy, anchor: EXP}
+
+rules:
+  - {type: regex, field: card_number, critical: true}
+  - {type: regex, field: holder_name}
+  - {type: not_expired, field: expiry_date, critical: true}
+  - {type: prefix_matches_variant, field: card_number}
+  - {type: lookup, field: card_number}          # skipped until an issuer verifier is registered

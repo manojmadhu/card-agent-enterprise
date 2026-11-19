@@ -1,0 +1,81 @@
+# FICTIONAL demo programme for scale testing — delete for production
+id: bh.demo21
+country: BH
+issuer: Demo issuer BH21
+name: Demo programme BH21
+schema_version: 1
+keywords:
+- DEMOBH21
+negative_keywords: []
+variants:
+- id: elite
+  name: Demo BH21 Elite
+  body_color_rgb:
+  - 201
+  - 162
+  - 39
+  keywords:
+  - ELITE
+  number_prefix: '1'
+- id: gold
+  name: Demo BH21 Gold
+  body_color_rgb:
+  - 58
+  - 60
+  - 66
+  keywords:
+  - GOLD
+  number_prefix: '2'
+- id: platinum
+  name: Demo BH21 Platinum
+  body_color_rgb:
+  - 90
+  - 50
+  - 140
+  keywords:
+  - PLATINUM
+  number_prefix: '3'
+- id: family
+  name: Demo BH21 Family
+  body_color_rgb:
+  - 22
+  - 22
+  - 26
+  keywords:
+  - FAMILY
+  number_prefix: '4'
+fields:
+- name: holder_name
+  roi:
+  - 0.05
+  - 0.55
+  - 0.75
+  - 0.68
+  regex: '[A-Z][A-Z .''-]{2,40}'
+  normalise: upper
+- name: card_number
+  roi:
+  - 0.05
+  - 0.4
+  - 0.75
+  - 0.54
+  regex: \d{10}
+  normalise: digits
+- name: expiry_date
+  roi:
+  - 0.05
+  - 0.72
+  - 0.5
+  - 0.86
+  regex: (0[1-9]|1[0-2])/(\d{2}|\d{4})
+  normalise: date_mm_yy
+  anchor: EXP
+rules:
+- type: regex
+  field: card_number
+  critical: true
+- type: not_expired
+  field: expiry_date
+  critical: true
+- type: prefix_matches_variant
+  field: card_number

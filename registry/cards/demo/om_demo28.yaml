@@ -1,0 +1,72 @@
+# FICTIONAL demo programme for scale testing — delete for production
+id: om.demo28
+country: OM
+issuer: Demo issuer OM28
+name: Demo programme OM28
+schema_version: 1
+keywords:
+- DEMOOM28
+negative_keywords: []
+variants:
+- id: family
+  name: Demo OM28 Family
+  body_color_rgb:
+  - 196
+  - 152
+  - 46
+  keywords:
+  - FAMILY
+  number_prefix: '1'
+- id: platinum
+  name: Demo OM28 Platinum
+  body_color_rgb:
+  - 20
+  - 120
+  - 90
+  keywords:
+  - PLATINUM
+  number_prefix: '2'
+- id: elite
+  name: Demo OM28 Elite
+  body_color_rgb:
+  - 230
+  - 120
+  - 30
+  keywords:
+  - ELITE
+  number_prefix: '3'
+fields:
+- name: holder_name
+  roi:
+  - 0.05
+  - 0.55
+  - 0.75
+  - 0.68
+  regex: '[A-Z][A-Z .''-]{2,40}'
+  normalise: upper
+- name: card_number
+  roi:
+  - 0.05
+  - 0.4
+  - 0.75
+  - 0.54
+  regex: \d{10}
+  normalise: digits
+- name: expiry_date
+  roi:
+  - 0.05
+  - 0.72
+  - 0.5
+  - 0.86
+  regex: (0[1-9]|1[0-2])/(\d{2}|\d{4})
+  normalise: date_mm_yy
+  anchor: EXP
+rules:
+- type: regex
+  field: card_number
+  critical: true
+- type: not_expired
+  field: expiry_date
+  critical: true
+- type: prefix_matches_variant
+  field: card_number

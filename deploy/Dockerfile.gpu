@@ -1,0 +1,24 @@
+# GPU image for NVIDIA T4 (Turing, sm_75) and newer. Uses ONNX Runtime CUDA for DINOv2.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ARG PIP_INDEX_URL
+ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONPATH=/app/src CARDAGENT_ROOT=/app \
+    HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 OMP_NUM_THREADS=4 \
+    CARDAGENT_EMBEDDER__KIND=dinov2_onnx
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip tesseract-ocr tesseract-ocr-ara libgl1 libglib2.0-0 curl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements-base.txt requirements-gpu.txt ./
+RUN pip3 install --no-cache-dir -r requirements-gpu.txt
+COPY src ./src
+COPY config ./config
+COPY registry ./registry
+COPY tools ./tools
+# DINOv2 ONNX file exported with tools/export_dinov2_onnx.py (not downloaded at runtime)
+COPY models/dinov2 ./models/dinov2
+RUN useradd -r -u 10001 agent && mkdir -p /app/data/index && chown -R agent /app/data
+USER agent
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s CMD curl -fs http://localhost:8080/health/ready || exit 1
+# index is built on first start against the GPU embedder (or mount a prebuilt data/index)
+CMD ["python3", "-m", "uvicorn", "cardagent.api.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

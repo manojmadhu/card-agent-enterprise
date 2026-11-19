@@ -1,0 +1,72 @@
+# FICTIONAL demo programme for scale testing — delete for production
+id: sa.demo12
+country: SA
+issuer: Demo issuer SA12
+name: Demo programme SA12
+schema_version: 1
+keywords:
+- DEMOSA12
+negative_keywords: []
+variants:
+- id: platinum
+  name: Demo SA12 Platinum
+  body_color_rgb:
+  - 196
+  - 152
+  - 46
+  keywords:
+  - PLATINUM
+  number_prefix: '1'
+- id: family
+  name: Demo SA12 Family
+  body_color_rgb:
+  - 230
+  - 120
+  - 30
+  keywords:
+  - FAMILY
+  number_prefix: '2'
+- id: classic
+  name: Demo SA12 Classic
+  body_color_rgb:
+  - 192
+  - 194
+  - 198
+  keywords:
+  - CLASSIC
+  number_prefix: '3'
+fields:
+- name: holder_name
+  roi:
+  - 0.05
+  - 0.55
+  - 0.75
+  - 0.68
+  regex: '[A-Z][A-Z .''-]{2,40}'
+  normalise: upper
+- name: card_number
+  roi:
+  - 0.05
+  - 0.4
+  - 0.75
+  - 0.54
+  regex: \d{10}
+  normalise: digits
+- name: expiry_date
+  roi:
+  - 0.05
+  - 0.72
+  - 0.5
+  - 0.86
+  regex: (0[1-9]|1[0-2])/(\d{2}|\d{4})
+  normalise: date_mm_yy
+  anchor: EXP
+rules:
+- type: regex
+  field: card_number
+  critical: true
+- type: not_expired
+  field: expiry_date
+  critical: true
+- type: prefix_matches_variant
+  field: card_number

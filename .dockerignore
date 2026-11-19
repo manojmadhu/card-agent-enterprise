@@ -1,0 +1,6 @@
+data/samples*
+data/index
+data/*.json
+**/__pycache__
+.venv
+.git

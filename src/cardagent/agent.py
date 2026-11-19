@@ -1,0 +1,193 @@
+"""CardAgent: orchestrates all stages and owns hot-reloadable engine state.
+
+Hot reload builds a complete new EngineState (registry + index) off to the side and swaps a
+single reference. Requests in flight keep the state they started with; a failed reload
+leaves the current state untouched.
+"""
+from __future__ import annotations
+
+import logging
+import threading
+import time
+import uuid
+from dataclasses import dataclass
+from datetime import date
+
+import cv2
+import numpy as np
+
+from . import __version__
+from .embed.embedders import Embedder, build_embedder
+from .index.reference_index import ReferenceIndex, build_or_load
+from .observability import telemetry as tm
+from .ocr.engines import OcrEngine, build_ocr
+from .pipeline import extract, identify, rules
+from .registry.store import RegistrySnapshot, load_registry
+from .schemas import ValidationResult
+from .settings import PROJECT_ROOT, Settings
+from .vision import normalise, quality
+from .vision.features import body_colour_rgb, extract_keypoints
+from .vlm.client import VlmClient
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class EngineState:
+    snapshot: RegistrySnapshot
+    index: ReferenceIndex
+
+
+class CardAgent:
+    def __init__(self, settings: Settings):
+        self.s = settings
+        self.embedder: Embedder = build_embedder(settings.embedder, PROJECT_ROOT)
+        self.ocr: OcrEngine = build_ocr(settings.ocr, PROJECT_ROOT)
+        self.vlm = VlmClient(settings.vlm) if settings.vlm.enabled else None
+        self._reload_lock = threading.Lock()
+        self.state: EngineState = self._build_state()
+
+    # ------------------------------------------------------------------ registry
+    def _build_state(self, force_index: bool = False) -> EngineState:
+        snap = load_registry(self.s.path(self.s.registry_dir))
+        idx = build_or_load(snap, self.embedder, self.s.path(self.s.index_dir),
+                            self.s.retrieval.orb_features, force=force_index)
+        if self.s.strict_index_version and idx.registry_version != snap.version:
+            raise RuntimeError("index/registry version mismatch")
+        tm.REGISTRY_INFO.set(len(idx.entries))
+        return EngineState(snap, idx)
+
+    def reload(self) -> dict:
+        with self._reload_lock:
+            try:
+                new = self._build_state()
+            except Exception:
+                tm.RELOADS.labels("failed").inc()
+                log.exception("registry reload failed; keeping version %s", self.state.snapshot.version)
+                raise
+            old = self.state.snapshot.version
+            self.state = new                                   # atomic reference swap
+            tm.RELOADS.labels("ok").inc()
+            log.info("registry reloaded %s -> %s", old, new.snapshot.version)
+            return new.snapshot.summary()
+
+    # ------------------------------------------------------------------ main entry
+    def process(self, image_bytes: bytes, request_id: str | None = None, today: date | None = None) -> dict:
+        st = self.state                                        # pin state for this request
+        t0 = time.perf_counter()
+        timings: dict[str, int] = {}
+
+        def lap(name, t):
+            dt = time.perf_counter() - t
+            timings[name] = int(dt * 1000)
+            tm.STAGE.labels(name).observe(dt)
+            return time.perf_counter()
+
+        out = {"request_id": request_id or str(uuid.uuid4()), "status": "REJECT", "reasons": [],
+               "model_versions": {"pipeline": __version__, "registry": st.snapshot.version,
+                                  "embedder": self.embedder.name, "ocr": self.ocr.name,
+                                  **({"vlm": self.s.vlm.model} if self.vlm else {})}}
+
+        img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return self._finish(out, "REJECT", ["INVALID_IMAGE"], t0, timings)
+
+        t = time.perf_counter()
+        q = quality.assess(img, self.s.quality)
+        out["quality"] = q
+        t = lap("quality", t)
+        if not q["passed"]:
+            return self._finish(out, "REJECT", ["RETAKE_REQUIRED", *q["issues"]], t0, timings)
+
+        card, ninfo = normalise.normalise(img)
+        t = lap("normalise", t)
+        card, full, rotation = self._ocr_orientation(card, st.index)
+        q.update(card_detected=ninfo["card_detected"], detector=ninfo["detector"], rotation=rotation)
+        t = lap("ocr_full", t)
+
+        qvec = self.embedder.embed(card)
+        qkp = extract_keypoints(card, self.s.retrieval.orb_features)
+        qcol = body_colour_rgb(card)
+        t = lap("features", t)
+
+        ident = identify.identify(st.index, st.snapshot.families, full, qvec, qkp, qcol,
+                                  self.s.retrieval, self.s.scoring, self.s.embedder.similarity_floor)
+        t = lap("identify", t)
+        out["candidates"] = {"family": ident.family_candidates}
+        if not ident.family_decided:
+            sc = self.s.scoring
+            reason = "UNKNOWN_CARD_TYPE" if ident.family_score < sc.family_min else "AMBIGUOUS_CARD_TYPE"
+            status = "REJECT" if ident.family_score < sc.reject_below else "REVIEW"
+            return self._finish(out, status, [reason], t0, timings)
+
+        fam = st.snapshot.families[ident.family_id]
+        v = fam.variant(ident.variant_id)
+        out["candidates"]["variant"] = ident.variant_candidates
+        out["card"] = {"family": fam.id, "family_name": fam.name, "country": fam.country, "issuer": fam.issuer,
+                       "family_confidence": ident.family_score, "variant": v.id if v else None,
+                       "variant_name": v.name if v else None, "variant_confidence": ident.variant_score}
+
+        H = ident.best_match.H if (ident.best_match and ident.best_match.inliers >= self.s.retrieval.min_inliers) else None
+        aligned, did_align = extract.align(card, H)
+        q["aligned_to_reference"] = did_align
+        fields = extract.extract_fields(fam, aligned, full, self.ocr, self.vlm)
+        t = lap("extract", t)
+        checks = rules.run_rules(fam, v.id if v else None, fields, today)
+        lap("rules", t)
+
+        status, reasons = self._decide(v, fields, checks)
+        for name, f in fields.items():
+            if f["source"] == "vlm":
+                tm.VLM_CALLS.inc()
+        out["fields"] = {}
+        for name, f in fields.items():
+            fr = {k: f[k] for k in ("value", "confidence", "source", "valid_format")}
+            spec = next(s for s in fam.fields if s.name == name)
+            if spec.normalise.startswith("date") and f["valid_format"]:
+                d = rules.parse_expiry(f["value"])
+                fr["valid_until"] = d.isoformat() if d else None
+            out["fields"][name] = fr
+        out["validation"] = checks
+        tm.FAMILY.labels(fam.id, v.id if v else "unknown").inc()
+        return self._finish(out, status, reasons, t0, timings)
+
+    # ------------------------------------------------------------------ helpers
+    def _ocr_orientation(self, card, idx: ReferenceIndex):
+        best = None
+        for rot in (0, 180):
+            img = card if rot == 0 else cv2.rotate(card, cv2.ROTATE_180)
+            o = self.ocr.read_full(img)
+            kw = max(idx.keyword_families(o["tokens"], o["text"]).values(), default=0.0)
+            score = kw + 0.1 * o["mean_conf"]
+            if best is None or score > best[0]:
+                best = (score, img, o, rot)
+            if kw >= 0.99:
+                break
+        return best[1], best[2], best[3]
+
+    def _decide(self, v, fields, checks) -> tuple[str, list[str]]:
+        reasons = []
+        if v is None:
+            reasons.append("AMBIGUOUS_VARIANT")
+        for name, f in fields.items():
+            if f["required"] and not f["valid_format"]:
+                reasons.append(f"FIELD_UNREADABLE:{name}")
+            elif f["valid_format"] and (f["confidence"] < self.s.scoring.field_min_confidence or f["source"] == "vlm"):
+                reasons.append(f"LOW_CONFIDENCE:{name}")
+        expired = any(c["rule"] == "not_expired" and c["result"] == "fail" and (c["detail"] or "").startswith("CARD_EXPIRED")
+                      for c in checks)
+        reasons += [f"RULE_FAILED:{c['rule']}:{c['field']}" for c in checks if c["result"] == "fail"]
+        if expired:
+            return "REJECT", ["CARD_EXPIRED", *reasons]
+        return ("REVIEW", reasons) if reasons else ("ACCEPT", [])
+
+    def _finish(self, out, status, reasons, t0, timings) -> dict:
+        out["status"], out["reasons"] = status, reasons
+        out["timings_ms"] = timings
+        out["processing_ms"] = int((time.perf_counter() - t0) * 1000)
+        result = ValidationResult.model_validate(out).model_dump()   # enforce the output contract
+        tm.REQUESTS.labels(status).inc()
+        tm.LATENCY.observe(out["processing_ms"] / 1000)
+        for r in reasons:
+            tm.REASONS.labels(r.split(":")[0]).inc()
+        return result

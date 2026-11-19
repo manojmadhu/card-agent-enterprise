@@ -1,0 +1,45 @@
+# Single T4 host: card agent + optional local VLM sharing one 16 GB GPU.
+# `internal: true` network = containers have NO route to the internet.
+services:
+  cardagent:
+    image: cardagent:1.0.0-gpu
+    build: {context: .., dockerfile: deploy/Dockerfile.gpu}
+    environment:
+      CARDAGENT_API__ADMIN_TOKEN: ${CARDAGENT_ADMIN_TOKEN:?set an admin token}
+      CARDAGENT_VLM__ENABLED: "${CARDAGENT_VLM_ENABLED:-false}"
+      CARDAGENT_VLM__URL: http://vlm:11434
+      CARDAGENT_VLM__MODEL: qwen2.5vl:7b
+    volumes:
+      - ../registry:/app/registry:ro          # hot-reloadable registry (POST /v1/admin/registry/reload)
+      - index:/app/data/index
+    ports: ["127.0.0.1:8080:8080"]           # put behind your internal gateway / mTLS
+    networks: [edge, private]
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  vlm:                                       # optional: docker compose --profile vlm up
+    profiles: [vlm]
+    image: ollama/ollama:latest              # mirror to your internal registry and pin a digest
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+      OLLAMA_NUM_PARALLEL: "2"
+    volumes: [ollama:/root/.ollama]          # pre-load the model: see docs/OPERATIONS.md
+    networks: [private]
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+    restart: unless-stopped
+
+networks:
+  edge: {}
+  private: {internal: true}
+
+volumes:
+  index: {}
+  ollama: {}

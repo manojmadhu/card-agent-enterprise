@@ -1,0 +1,71 @@
+# Card Validation Agent — runtime configuration.
+# Every key can be overridden by an environment variable:
+#   CARDAGENT_<SECTION>__<KEY>, e.g. CARDAGENT_EMBEDDER__KIND=dinov2_onnx
+# Paths are relative to the project root unless absolute.
+
+registry_dir: registry
+index_dir: data/index
+strict_index_version: false        # true = refuse to start if the index was built for another registry version
+
+embedder:
+  kind: classic                    # classic (no model, CPU) | dinov2_onnx (recommended for production)
+  onnx_path: models/dinov2/dinov2_vits14.onnx
+  onnx_providers: [CUDAExecutionProvider, CPUExecutionProvider]
+  input_size: 224
+  similarity_floor: 0.55           # cosine below this counts as 0 (classic ~0.55, dinov2 ~0.30 — calibrate)
+
+ocr:
+  engine: tesseract                # tesseract | paddle
+  tesseract_lang: eng+ara
+  paddle_det_dir: models/paddleocr/det
+  paddle_rec_dir_en: models/paddleocr/rec_en
+  paddle_rec_dir_ar: models/paddleocr/rec_ar
+  use_gpu: false
+
+retrieval:
+  shortlist_refs: 20               # stage-1: nearest reference images from the vector index
+  max_verify_refs: 24              # stage-2: max references verified with ORB+RANSAC per request
+  refs_per_variant_verify: 2
+  orb_features: 1000
+  ratio_test: 0.75
+  min_inliers: 25                  # RANSAC inliers needed to trust the homography for alignment
+  inliers_baseline: 35             # inliers two DIFFERENT cards with a shared template/font typically reach
+  inliers_full_score: 120          # inliers that count as a perfect geometric match (calibrate on real refs)
+
+scoring:
+  family_weights: {text: 0.40, embed: 0.20, geometry: 0.30, colour: 0.10}
+  variant_weights: {colour: 0.40, keyword: 0.25, geometry: 0.15, embed: 0.10, prefix: 0.10}
+  family_min: 0.50
+  family_margin: 0.12
+  variant_min: 0.45
+  variant_margin: 0.08
+  reject_below: 0.30               # family score below this = REJECT (unknown card), between = REVIEW
+  geometry_required_without_text: 0.60   # no issuer text read -> accept only on strong design match
+  field_min_confidence: 0.55
+
+quality:
+  min_side: 400
+  min_blur: 60.0
+  max_glare: 0.08
+  brightness_min: 0.15
+  brightness_max: 0.92
+
+vlm:
+  enabled: false
+  kind: ollama                     # ollama | openai  (openai = any OpenAI-compatible server: vLLM, llama.cpp)
+  url: http://vlm:11434            # INTERNAL endpoint only
+  model: qwen2.5vl:7b
+  timeout_s: 30
+  circuit_breaker_failures: 3
+  circuit_breaker_cooldown_s: 60
+
+api:
+  admin_token: ""                  # set via CARDAGENT_API__ADMIN_TOKEN; empty = admin endpoints disabled
+  max_image_bytes: 8000000
+  allowed_content_types: [image/jpeg, image/png, image/webp]
+  idempotency_cache_size: 2000
+
+logging:
+  level: INFO
+  json: true
+  mask_pii: true

@@ -1,0 +1,63 @@
+# FICTIONAL demo programme for scale testing — delete for production
+id: ae.demo05
+country: AE
+issuer: Demo issuer AE05
+name: Demo programme AE05
+schema_version: 1
+keywords:
+- DEMOAE05
+negative_keywords: []
+variants:
+- id: elite
+  name: Demo AE05 Elite
+  body_color_rgb:
+  - 22
+  - 22
+  - 26
+  keywords:
+  - ELITE
+  number_prefix: '1'
+- id: platinum
+  name: Demo AE05 Platinum
+  body_color_rgb:
+  - 120
+  - 180
+  - 200
+  keywords:
+  - PLATINUM
+  number_prefix: '2'
+fields:
+- name: holder_name
+  roi:
+  - 0.05
+  - 0.55
+  - 0.75
+  - 0.68
+  regex: '[A-Z][A-Z .''-]{2,40}'
+  normalise: upper
+- name: card_number
+  roi:
+  - 0.05
+  - 0.4
+  - 0.75
+  - 0.54
+  regex: \d{10}
+  normalise: digits
+- name: expiry_date
+  roi:
+  - 0.05
+  - 0.72
+  - 0.5
+  - 0.86
+  regex: (0[1-9]|1[0-2])/(\d{2}|\d{4})
+  normalise: date_mm_yy
+  anchor: EXP
+rules:
+- type: regex
+  field: card_number
+  critical: true
+- type: not_expired
+  field: expiry_date
+  critical: true
+- type: prefix_matches_variant
+  field: card_number

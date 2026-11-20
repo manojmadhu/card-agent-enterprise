@@ -23,7 +23,7 @@ def agent():
 
 
 def _case(name):
-    return next(c for c in json.loads((SAMPLES / "manifest.json").read_text()) if c["file"] == name)
+    return next(c for c in json.loads((SAMPLES / "manifest.json").read_text(encoding="utf-8")) if c["file"] == name)
 
 
 @pytest.mark.parametrize("name", ["fazaa_gold.jpg", "esaad_privilege.jpg", "fazaa_gold_upside_down.jpg",

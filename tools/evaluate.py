@@ -32,7 +32,7 @@ def main():
 
     today = date.fromisoformat(a.today) if a.today else None
     manifest_path = Path(a.manifest)
-    cases = json.loads(manifest_path.read_text())
+    cases = json.loads(manifest_path.read_text(encoding="utf-8"))
     agent = CardAgent(get_settings())
 
     rows, conf_family, conf_variant = [], defaultdict(Counter), defaultdict(Counter)
@@ -76,7 +76,7 @@ def main():
         "registry_version": agent.state.snapshot.version, "embedder": agent.embedder.name,
         "rows": rows,
     }
-    Path(a.out).write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    Path(a.out).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"{'file':38} {'expected':8} {'got':8} {'family':12} {'variant':10} {'ms':>5}  reasons")
     for r in rows:

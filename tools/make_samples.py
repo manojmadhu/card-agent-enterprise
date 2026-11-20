@@ -22,16 +22,25 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 W, H = 1012, 638
-FONT_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-FONT_M = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
+# Linux (DejaVu) first, then Windows / macOS equivalents. Bare names are resolved by Pillow from the OS font dir.
+FONT_B = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "DejaVuSans-Bold.ttf", "arialbd.ttf",
+          "/System/Library/Fonts/Supplemental/Arial Bold.ttf")
+# Courier New before Consolas: Consolas draws a dotted zero that Tesseract misreads as 6.
+FONT_M = ("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", "DejaVuSansMono-Bold.ttf", "courbd.ttf",
+          "consolab.ttf", "/System/Library/Fonts/Supplemental/Courier New Bold.ttf")
 NAMES = ["AHMED ALI HASSAN", "FATIMA SAEED", "OMAR KHALID", "MARIAM YOUSEF", "SARA AL MANSOORI",
          "KHALID RASHID", "NOURA SALEM", "YOUSEF IBRAHIM", "HESSA MOHAMMED", "RASHID OBAID",
          "LATIFA HAMAD", "SALEM JABER", "AISHA NASSER", "HAMDAN SAIF"]
 COUNTRIES = ["sa", "qa", "kw", "bh", "om", "ae"]
 
 
-def font(p, s):
-    return ImageFont.truetype(p, s)
+def font(candidates, s):
+    for p in candidates:
+        try:
+            return ImageFont.truetype(p, s)
+        except OSError:
+            continue
+    raise OSError(f"none of these fonts were found: {candidates}")
 
 
 def fy(fam, name, default):
@@ -168,11 +177,12 @@ def main():
         for f in demos:
             (demo_dir / f"{f['id'].replace('.', '_')}.yaml").write_text(
                 "# FICTIONAL demo programme for scale testing — delete for production\n"
-                + yaml.safe_dump({k: v for k, v in f.items() if not k.startswith("_")}, sort_keys=False, allow_unicode=True))
+                + yaml.safe_dump({k: v for k, v in f.items() if not k.startswith("_")}, sort_keys=False, allow_unicode=True),
+                encoding="utf-8")
 
     fams = []
     for p in sorted((ROOT / "registry" / "cards").rglob("*.yaml")):
-        f = yaml.safe_load(p.read_text())
+        f = yaml.safe_load(p.read_text(encoding="utf-8"))
         f["_title"] = f["keywords"][0] if not f["id"].startswith(tuple(f"{c}.demo" for c in COUNTRIES)) else f"DEMO{f['id'].split('demo')[0][:2].upper()}{f['id'][-2:]}"
         f["_style"] = {"ae.fazaa": 0, "ae.esaad": 1}.get(f["id"], next((d["_style"] for d in demos if d["id"] == f["id"]), 2))
         fams.append(f)
@@ -219,7 +229,7 @@ def main():
                  "JOHN SMITH", "5555444433", "10/28", None, 3)
     cv2.imwrite(str(sd / "unknown_card.jpg"), photograph(unk, 999))
     manifest.append({"file": "unknown_card.jpg", "family": None, "variant": None, "expected_status": "REJECT", "fields": {}})
-    (sd / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    (sd / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if a.scale_photos_per_variant:
         sc = ROOT / "data" / "samples_scale"
         shutil.rmtree(sc, ignore_errors=True)
@@ -237,7 +247,7 @@ def main():
                                 [cv2.IMWRITE_JPEG_QUALITY, 88])
                     sm.append({"file": fn, "family": f["id"], "variant": v["id"], "expected_status": "ACCEPT",
                                "fields": {"card_number": num, "holder_name": name, "expiry_date": "12/28"}})
-        (sc / "manifest.json").write_text(json.dumps(sm, indent=2))
+        (sc / "manifest.json").write_text(json.dumps(sm, indent=2), encoding="utf-8")
         print(f"scale set: {len(sm)} photos in {sc}")
     nv = sum(len(f["variants"]) for f in fams)
     print(f"{len(fams)} families, {nv} variants, {nv * a.refs_per_variant} reference images, {len(manifest)} test photos")

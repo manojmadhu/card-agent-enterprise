@@ -155,14 +155,14 @@ def _build(d: Path, snapshot, embedder, kw_map, neg_map, n_features) -> Referenc
     (d / "meta.json").write_text(json.dumps({
         "registry_version": snapshot.version, "embedder": embedder.name, "dim": dim,
         "entries": [{"family": e.family_id, "variant": e.variant_id, "path": e.path, "colour": e.colour}
-                    for e in entries]}, indent=1))
+                    for e in entries]}, indent=1), encoding="utf-8")
     log.info("built reference index: %d refs, dim=%d in %.1fs -> %s", len(entries), dim, time.time() - t0, d)
     vmat = np.stack(vecs).astype(np.float32) if vecs else np.zeros((0, dim), np.float32)
     return ReferenceIndex(snapshot.version, embedder.name, entries, index, vmat, kw_map, neg_map)
 
 
 def _load(d: Path, snapshot, embedder, kw_map, neg_map) -> ReferenceIndex:
-    meta = json.loads((d / "meta.json").read_text())
+    meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
     if meta["registry_version"] != snapshot.version or meta["embedder"] != embedder.name:
         raise ValueError("index metadata does not match registry/embedder")
     kp = np.load(d / "keypoints.npz")

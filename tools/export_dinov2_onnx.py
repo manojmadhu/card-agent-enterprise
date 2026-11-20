@@ -43,7 +43,11 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     dummy = torch.randn(1, 3, a.size, a.size)
     torch.onnx.export(Wrapper(model), dummy, str(out), input_names=["pixel_values"], output_names=["embedding"],
-                      dynamic_axes={"pixel_values": {0: "batch"}, "embedding": {0: "batch"}}, opset_version=17)
+                      dynamic_axes={"pixel_values": {0: "batch"}, "embedding": {0: "batch"}},
+                      # opset 18: the torch>=2.9 exporter emits 18 natively and its down-conversion to 17
+                      # fails on ReduceMean; onnxruntime>=1.17 supports 18. Keep weights inside the .onnx
+                      # (model is <2GB) so the air-gapped copy is a single file.
+                      opset_version=18, external_data=False)
     if a.fp16:
         import onnx
         from onnxconverter_common import float16

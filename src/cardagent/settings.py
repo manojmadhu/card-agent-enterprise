@@ -91,7 +91,7 @@ class _YamlSource(PydanticBaseSettingsSource):
         return None, field_name, False
 
     def __call__(self):
-        return yaml.safe_load(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
+        return yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
 
 
 class Settings(BaseSettings):

@@ -8,11 +8,11 @@ index_dir: data/index
 strict_index_version: false        # true = refuse to start if the index was built for another registry version
 
 embedder:
-  kind: classic                    # classic (no model, CPU) | dinov2_onnx (recommended for production)
+  kind: dinov2_onnx                    # classic (no model, CPU) | dinov2_onnx (recommended for production)
   onnx_path: models/dinov2/dinov2_vits14.onnx
-  onnx_providers: [CUDAExecutionProvider, CPUExecutionProvider]
+  onnx_providers: [CPUExecutionProvider]
   input_size: 224
-  similarity_floor: 0.55           # cosine below this counts as 0 (classic ~0.55, dinov2 ~0.30 — calibrate)
+  similarity_floor: 0.60           # cosine below this counts as 0 (classic ~0.55, dinov2 ~0.60 on synthetic samples — recalibrate on real cards)
 
 ocr:
   engine: tesseract                # tesseract | paddle

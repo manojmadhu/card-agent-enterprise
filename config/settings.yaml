@@ -32,6 +32,8 @@ retrieval:
   min_inliers: 25                  # RANSAC inliers needed to trust the homography for alignment
   inliers_baseline: 35             # inliers two DIFFERENT cards with a shared template/font typically reach
   inliers_full_score: 120          # inliers that count as a perfect geometric match (calibrate on real refs)
+  max_align_shift: 0.12            # card already detected+rectified: ignore a homography that moves a corner more
+                                   # than this fraction of card width (good alignments <0.10, bad ones extrapolate)
 
 scoring:
   family_weights: {text: 0.40, embed: 0.20, geometry: 0.30, colour: 0.10}

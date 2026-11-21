@@ -41,6 +41,7 @@ class RetrievalCfg(BaseModel):
     min_inliers: int = 25
     inliers_baseline: int = 35
     inliers_full_score: int = 120
+    max_align_shift: float = 0.12    # skip alignment of a detected card if H moves a corner > this × card width
 
 
 class ScoringCfg(BaseModel):

@@ -26,6 +26,14 @@ FULLTEXT_PATTERNS = {
 }
 
 
+def corner_shift(H: np.ndarray) -> float:
+    """Largest distance any card corner moves under H, as a fraction of card width. On an already
+    rectified card a correct alignment is a small correction; a large shift means the homography was
+    fitted to matches clustered in one area (logo, artwork) and extrapolates badly elsewhere."""
+    c = np.float32([[0, 0], [CARD_W, 0], [CARD_W, CARD_H], [0, CARD_H]]).reshape(-1, 1, 2)
+    return float(np.max(np.linalg.norm(cv2.perspectiveTransform(c, H) - c, axis=2)) / CARD_W)
+
+
 def align(card: np.ndarray, H: np.ndarray | None) -> tuple[np.ndarray, bool]:
     if H is None:
         return card, False

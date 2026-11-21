@@ -128,6 +128,11 @@ class CardAgent:
                        "variant_name": v.name if v else None, "variant_confidence": ident.variant_score}
 
         H = ident.best_match.H if (ident.best_match and ident.best_match.inliers >= self.s.retrieval.min_inliers) else None
+        if H is not None and ninfo["card_detected"]:
+            shift = extract.corner_shift(H)
+            q["align_shift"] = round(shift, 3)
+            if shift > self.s.retrieval.max_align_shift:
+                H = None                                       # implausible correction: keep the rectified card
         aligned, did_align = extract.align(card, H)
         q["aligned_to_reference"] = did_align
         fields = extract.extract_fields(fam, aligned, full, self.ocr, self.vlm)

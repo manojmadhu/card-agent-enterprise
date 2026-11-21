@@ -17,6 +17,7 @@ embedder:
 ocr:
   engine: tesseract                # tesseract | paddle
   tesseract_lang: eng+ara
+  tesseract_cmd: ""                # empty = find on PATH, then C:\Program Files\Tesseract-OCR (Windows)
   paddle_det_dir: models/paddleocr/det
   paddle_rec_dir_en: models/paddleocr/rec_en
   paddle_rec_dir_ar: models/paddleocr/rec_ar

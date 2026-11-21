@@ -25,6 +25,7 @@ class EmbedderCfg(BaseModel):
 class OcrCfg(BaseModel):
     engine: Literal["tesseract", "paddle"] = "tesseract"
     tesseract_lang: str = "eng+ara"
+    tesseract_cmd: str = ""          # path to the tesseract binary; empty = PATH, then the standard install dirs
     paddle_det_dir: str = "models/paddleocr/det"
     paddle_rec_dir_en: str = "models/paddleocr/rec_en"
     paddle_rec_dir_ar: str = "models/paddleocr/rec_ar"

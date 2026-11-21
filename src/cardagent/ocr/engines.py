@@ -2,6 +2,8 @@
 better on worn/embossed cards). Both run fully offline from local model files."""
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 from typing import Protocol
 
@@ -29,9 +31,30 @@ def _binarise(img_bgr, invert: bool, upscale: float = 1.0) -> np.ndarray:
     return th
 
 
+def _find_tesseract(explicit: str = "") -> str | None:
+    """Explicit setting wins; else PATH; else the standard Windows installer locations
+    (the UB-Mannheim installer does not add itself to PATH)."""
+    if explicit:
+        if not Path(explicit).is_file():
+            raise FileNotFoundError(f"ocr.tesseract_cmd points to a missing file: {explicit}")
+        return explicit
+    if shutil.which("tesseract"):
+        return None                                   # pytesseract's default lookup works
+    for base in (os.getenv("ProgramFiles"), os.getenv("ProgramFiles(x86)"), os.getenv("LOCALAPPDATA")):
+        if base:
+            for sub in ("Tesseract-OCR", os.path.join("Programs", "Tesseract-OCR")):
+                cand = Path(base) / sub / "tesseract.exe"
+                if cand.is_file():
+                    return str(cand)
+    return None
+
+
 class TesseractOcr:
-    def __init__(self, lang: str):
+    def __init__(self, lang: str, cmd: str = ""):
         import pytesseract
+        found = _find_tesseract(cmd)
+        if found:
+            pytesseract.pytesseract.tesseract_cmd = found
         self._t = pytesseract
         self.lang = lang
         self.name = f"tesseract-{pytesseract.get_tesseract_version()}"
@@ -100,4 +123,4 @@ class PaddleOcrEngine:
 
 
 def build_ocr(cfg: OcrCfg, root: Path) -> OcrEngine:
-    return PaddleOcrEngine(cfg, root) if cfg.engine == "paddle" else TesseractOcr(cfg.tesseract_lang)
+    return PaddleOcrEngine(cfg, root) if cfg.engine == "paddle" else TesseractOcr(cfg.tesseract_lang, cfg.tesseract_cmd)

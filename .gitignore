@@ -4,3 +4,4 @@ data/index/
 data/samples*/
 data/*.json
 models/
+*.egg-info/

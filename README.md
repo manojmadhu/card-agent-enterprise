@@ -22,7 +22,7 @@ curl -F image=@data/samples/fazaa_gold.jpg -F request_id=abc http://localhost:80
 ## API
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/v1/cards/validate` | multipart `image` (jpeg/png/webp ≤ 8 MB) + optional `request_id` (idempotent) |
+| POST | `/v1/cards/validate` | multipart `image` (jpeg/png/webp ≤ 8 MB) + optional `request_id` (idempotent: a retry with the same id **and** same image returns the cached result; a different image is always processed) |
 | GET | `/v1/registry` | loaded families/variants/reference counts + registry version |
 | POST | `/v1/admin/registry/reload` | header `X-Admin-Token`; validates + rebuilds index, atomic swap, keeps old version on failure |
 | GET | `/health/live`, `/health/ready` | liveness / readiness (registry, embedder, OCR, VLM status) |

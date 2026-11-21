@@ -80,6 +80,10 @@ def test_api(monkeypatch):
             r2 = cl.post("/v1/cards/validate", files={"image": ("c.jpg", fh, "image/jpeg")},
                          data={"request_id": "req-1"})
         assert r2.json()["processing_ms"] == r.json()["processing_ms"]
+        with open(SAMPLES / "esaad_gold.jpg", "rb") as fh:     # same request_id, DIFFERENT photo
+            r3 = cl.post("/v1/cards/validate", files={"image": ("c.jpg", fh, "image/jpeg")},
+                         data={"request_id": "req-1"})
+        assert r3.json()["card"]["family"] == "ae.esaad"         # processed fresh, not the cached Fazaa result
         bad = cl.post("/v1/cards/validate", files={"image": ("c.txt", b"x", "text/plain")})
         assert bad.status_code == 415
         assert cl.post("/v1/admin/registry/reload").status_code == 401

@@ -66,7 +66,7 @@ api:
   admin_token: ""                  # set via CARDAGENT_API__ADMIN_TOKEN; empty = admin endpoints disabled
   max_image_bytes: 8000000
   allowed_content_types: [image/jpeg, image/png, image/webp]
-  idempotency_cache_size: 2000
+  idempotency_cache_size: 2000     # retries keyed on request_id + image hash; 0 disables the cache
 
 logging:
   level: INFO

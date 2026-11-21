@@ -1,6 +1,7 @@
 """REST API.  Run: uvicorn cardagent.api.app:app --host 0.0.0.0 --port 8080 --workers N"""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 from collections import OrderedDict
@@ -22,7 +23,9 @@ log = logging.getLogger("cardagent.api")
 
 
 class _IdempotencyCache:
-    """Same request_id -> same result (capture systems retry on timeouts).
+    """Same request_id AND same image bytes -> same result (capture systems retry on timeouts).
+    Keyed on both, so reusing a request_id with a different photo is processed fresh instead of
+    replaying the earlier card's decision. Size 0 disables caching.
     Single-process cache; use Redis when running several replicas."""
 
     def __init__(self, size: int):
@@ -36,6 +39,8 @@ class _IdempotencyCache:
             return v
 
     def put(self, k, v):
+        if self.size <= 0:
+            return
         with self.lock:
             self.data[k] = v
             if len(self.data) > self.size:
@@ -83,11 +88,12 @@ async def validate(image: UploadFile = File(...), request_id: str | None = Form(
     if len(data) > s.api.max_image_bytes:
         raise HTTPException(413, "image too large")
     cache = STATE["cache"]
-    if request_id and (hit := cache.get(request_id)) is not None:
+    key = (request_id, hashlib.sha256(data).hexdigest()) if request_id else None
+    if key and (hit := cache.get(key)) is not None:
         return hit
     result = await run_in_threadpool(a.process, data, request_id)   # CPU/GPU work off the event loop
-    if request_id:
-        cache.put(request_id, result)
+    if key:
+        cache.put(key, result)
     log.info("decision", extra={"extra_json": audit_record(result, s.logging.mask_pii)})
     return result
 

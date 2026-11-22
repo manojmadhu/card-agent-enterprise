@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import yaml
 
-from cardagent.index.reference_index import skeleton
+from cardagent.store.keywords import skeleton
 from cardagent.pipeline.extract import normalise_value
 from cardagent.pipeline.rules import luhn_ok, parse_expiry, run_rules
 from cardagent.registry.models import CardFamily

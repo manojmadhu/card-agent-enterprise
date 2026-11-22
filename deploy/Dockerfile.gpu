@@ -16,9 +16,10 @@ COPY registry ./registry
 COPY tools ./tools
 # DINOv2 ONNX file exported with tools/export_dinov2_onnx.py (not downloaded at runtime)
 COPY models/dinov2 ./models/dinov2
-RUN useradd -r -u 10001 agent && mkdir -p /app/data/index && chown -R agent /app/data
+RUN useradd -r -u 10001 agent && mkdir -p /app/data/index /app/data/reference_store && chown -R agent /app/data
 USER agent
+RUN python3 tools/build_index.py --validate-only
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD curl -fs http://localhost:8080/health/ready || exit 1
-# index is built on first start against the GPU embedder (or mount a prebuilt data/index)
+# vectors live in Qdrant: the registry-sync service (docker-compose.yml) loads them before the agent starts
 CMD ["python3", "-m", "uvicorn", "cardagent.api.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import logging
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from threading import Lock
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from .. import __version__
@@ -18,6 +17,9 @@ from ..agent import CardAgent
 from ..observability.telemetry import audit_record, setup_logging
 from ..schemas import ValidationResult
 from ..settings import get_settings
+from ..store.base import StoreUnavailable
+from . import admin_cards
+from .deps import STATE, agent, require_admin
 
 log = logging.getLogger("cardagent.api")
 
@@ -47,35 +49,26 @@ class _IdempotencyCache:
                 self.data.popitem(last=False)
 
 
-STATE: dict = {}
-
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     s = get_settings()
     setup_logging(s.logging.level, s.logging.json_logs)
     STATE["agent"] = CardAgent(s)
     STATE["cache"] = _IdempotencyCache(s.api.idempotency_cache_size)
-    log.info("card agent ready", extra={"extra_json": {"registry": STATE["agent"].state.snapshot.version}})
+    log.info("card agent ready", extra={"extra_json": {"registry": STATE["agent"].state.version,
+                                                        "vector_store": STATE["agent"].store.backend}})
     yield
 
 
 app = FastAPI(title="Card Validation Agent", version=__version__, lifespan=lifespan)
+app.include_router(admin_cards.router)
 
 
-def agent() -> CardAgent:
-    a = STATE.get("agent")
-    if a is None:
-        raise HTTPException(503, "not ready")
-    return a
-
-
-def require_admin(x_admin_token: str = Header(default="")):
-    token = get_settings().api.admin_token
-    if not token:
-        raise HTTPException(403, "admin endpoints disabled (set CARDAGENT_API__ADMIN_TOKEN)")
-    if not hmac.compare_digest(x_admin_token, token):
-        raise HTTPException(401, "invalid admin token")
+@app.exception_handler(StoreUnavailable)
+async def _store_unavailable(_req: Request, exc: StoreUnavailable):
+    log.error("vector store unavailable: %s", exc)
+    return JSONResponse(status_code=503, content={"detail": "vector store unavailable, retry later"},
+                        headers={"Retry-After": "5"})
 
 
 @app.post("/v1/cards/validate", response_model=ValidationResult)
@@ -100,7 +93,8 @@ async def validate(image: UploadFile = File(...), request_id: str | None = Form(
 
 @app.get("/v1/registry")
 def registry(a: CardAgent = Depends(agent)):
-    return a.state.snapshot.summary()
+    a.refresh_if_changed()
+    return {**a.state.summary(), "vector_store": a.store.backend}
 
 
 @app.post("/v1/admin/registry/reload", dependencies=[Depends(require_admin)])
@@ -121,8 +115,11 @@ def ready():
     a = STATE.get("agent")
     if a is None:
         raise HTTPException(503, "loading")
-    return {"status": "ready", "registry": a.state.snapshot.version, "references": len(a.state.index.entries),
-            "embedder": a.embedder.name, "ocr": a.ocr.name, "vlm": bool(a.vlm and a.vlm.available)}
+    if not a.store.healthy():
+        raise HTTPException(503, f"vector store ({a.store.backend}) unreachable")
+    return {"status": "ready", "registry": a.state.version, "references": a.state.ref_count,
+            "vector_store": a.store.backend, "embedder": a.embedder.name, "ocr": a.ocr.name,
+            "vlm": bool(a.vlm and a.vlm.available)}
 
 
 @app.get("/metrics")

@@ -2,9 +2,13 @@
 
 Stage 1 (recall, cheap):   vector search over ALL reference images  +  OCR keyword inverted index
                            -> candidate families (shortlist)
-Stage 2 (precision):       ORB + RANSAC geometric verification on a capped set of shortlisted refs,
+Stage 2 (precision):       similarity to every reference of the candidate families (filtered vector
+                           query), ORB + RANSAC geometric verification on a capped set of them,
                            fused with text, embedding and colour scores -> family, then variant.
 Decisions need score >= min AND margin over runner-up >= margin.
+
+Works against any store backend (FAISS file index or Qdrant) through RefView; the cost per request
+depends on the shortlisted families, never on the total number of cards.
 """
 from __future__ import annotations
 
@@ -14,9 +18,10 @@ from difflib import SequenceMatcher
 
 import numpy as np
 
-from ..index.reference_index import ReferenceIndex
 from ..registry.models import CardFamily
 from ..settings import RetrievalCfg, ScoringCfg
+from ..store.base import RefView
+from ..store.keywords import KeywordIndex
 from ..vision.features import GeoMatch, Keypoints, colour_similarity, verify
 
 
@@ -31,7 +36,7 @@ class Identification:
     variant_id: str | None = None
     variant_score: float = 0.0
     variant_candidates: list[dict] = field(default_factory=list)
-    best_ref: int | None = None              # index into ReferenceIndex.entries
+    best_ref: str | None = None              # ref_id of the reference used for alignment
     best_match: GeoMatch | None = None       # its homography (query -> reference)
     refs_verified: int = 0
 
@@ -59,27 +64,33 @@ def _decide(cands: list[dict], min_score: float, margin: float) -> tuple[bool, f
     return cands[0]["score"] >= min_score and m >= margin, round(m, 3)
 
 
-def identify(idx: ReferenceIndex, families: dict[str, CardFamily], ocr: dict, qvec: np.ndarray,
-             qkp: Keypoints, qcolour, rcfg: RetrievalCfg, scfg: ScoringCfg, sim_floor: float) -> Identification:
+def identify(refs_view: RefView, keywords: KeywordIndex, families: dict[str, CardFamily], ocr: dict,
+             qvec: np.ndarray, qkp: Keypoints, qcolour, rcfg: RetrievalCfg, scfg: ScoringCfg,
+             sim_floor: float) -> Identification:
     tokens, text = ocr["tokens"], ocr["text"]
-    all_sims = idx.vectors @ qvec                                   # cosine to every reference (cheap)
-    nn = idx.search(qvec, rcfg.shortlist_refs)                      # stage-1 vector shortlist
-    kw_hits = idx.keyword_families(tokens, text)                    # stage-1 keyword shortlist
-    negatives = idx.negative_hits(text)
-    cand_fams = {idx.entries[i].family_id for i, _ in nn} | set(kw_hits)
+    nn = refs_view.search(qvec, rcfg.shortlist_refs)                # stage-1 vector shortlist
+    kw_hits = keywords.keyword_families(tokens, text)               # stage-1 keyword shortlist
+    negatives = keywords.negative_hits(text)
+    cand_fams = {h.family_id for h in nn} | set(kw_hits)
     cand_fams = {f for f in cand_fams if f in families}
 
+    # cosine to every reference of the candidate families (one filtered vector query)
+    hits = refs_view.family_refs(qvec, cand_fams, rcfg.max_candidate_refs)
+    all_sims = {h.ref_id: h.score for h in hits}
+    ref_family = {h.ref_id: h.family_id for h in hits}
+    ref_variant = {h.ref_id: h.variant_id for h in hits}
+
     # ---- choose which references to verify geometrically (bounded cost) ----
-    by_variant: dict[tuple[str, str], list[int]] = {}
-    for i, e in enumerate(idx.entries):
-        if e.family_id in cand_fams:
-            by_variant.setdefault((e.family_id, e.variant_id), []).append(i)
-    to_verify: list[int] = []
+    by_variant: dict[tuple[str, str], list[str]] = {}
+    for h in hits:
+        by_variant.setdefault((h.family_id, h.variant_id), []).append(h.ref_id)
+    to_verify: list[str] = []
     for refs in by_variant.values():
         to_verify += sorted(refs, key=lambda i: -all_sims[i])[:rcfg.refs_per_variant_verify]
-    to_verify = sorted(to_verify, key=lambda i: -(all_sims[i] + (1.0 if idx.entries[i].family_id in kw_hits else 0)))
+    to_verify = sorted(to_verify, key=lambda i: -(all_sims[i] + (1.0 if ref_family[i] in kw_hits else 0)))
     to_verify = to_verify[:rcfg.max_verify_refs]
-    geo: dict[int, GeoMatch] = {i: verify(qkp, idx.entries[i].kp, rcfg.ratio_test) for i in to_verify}
+    kps = refs_view.keypoints(to_verify)
+    geo: dict[str, GeoMatch] = {i: verify(qkp, kps[i], rcfg.ratio_test) for i in to_verify if i in kps}
 
     def geo_score(inl: int) -> float:
         # inliers at or below the baseline are what two cards sharing a template/font produce
@@ -139,8 +150,8 @@ def identify(idx: ReferenceIndex, families: dict[str, CardFamily], ocr: dict, qv
     res.variant_score = var_cands[0]["score"]
 
     # best reference for alignment: most inliers, preferring the chosen variant
-    pool = [i for i in geo if idx.entries[i].family_id == fam.id
-            and (res.variant_id is None or idx.entries[i].variant_id == res.variant_id)]
+    pool = [i for i in geo if ref_family[i] == fam.id
+            and (res.variant_id is None or ref_variant[i] == res.variant_id)]
     if pool:
         b = max(pool, key=lambda i: geo[i].inliers)
         res.best_ref, res.best_match = b, geo[b]

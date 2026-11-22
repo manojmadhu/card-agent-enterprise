@@ -54,7 +54,8 @@ def main():
         m = float16.convert_float_to_float16(onnx.load(str(out)), keep_io_types=True)
         onnx.save(m, str(out))
     print(f"exported {out}  — set embedder.kind=dinov2_onnx and embedder.onnx_path={out}, "
-          "then rebuild the index (python tools/build_index.py --force) and re-run tools/evaluate.py "
+          "then re-embed the references (python tools/build_index.py --reembed; faiss backend: --force) "
+          "and re-run tools/evaluate.py "
           "to recalibrate embedder.similarity_floor.")
 
 

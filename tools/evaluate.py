@@ -73,7 +73,7 @@ def main():
         "latency_ms": {"p50": lat[n // 2], "p95": lat[min(n - 1, int(n * .95))], "max": lat[-1]},
         "family_confusion": {k: dict(v) for k, v in conf_family.items()},
         "variant_errors": {k: dict(v) for k, v in conf_variant.items() if set(v) != {k}},
-        "registry_version": agent.state.snapshot.version, "embedder": agent.embedder.name,
+        "registry_version": agent.state.version, "vector_store": agent.store.backend, "embedder": agent.embedder.name,
         "rows": rows,
     }
     Path(a.out).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")

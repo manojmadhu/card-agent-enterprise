@@ -59,9 +59,9 @@ def test_garbage_bytes(agent):
 
 
 def test_hot_reload_keeps_version_when_unchanged(agent):
-    before = agent.state.snapshot.version
+    before = agent.state.version
     agent.reload()
-    assert agent.state.snapshot.version == before
+    assert agent.state.version == before
 
 
 def test_api(monkeypatch):
@@ -88,5 +88,7 @@ def test_api(monkeypatch):
         assert bad.status_code == 415
         assert cl.post("/v1/admin/registry/reload").status_code == 401
         assert cl.post("/v1/admin/registry/reload", headers={"X-Admin-Token": "s3cret"}).status_code == 200
+        if cl.get("/health/ready").json()["vector_store"] == "faiss":           # card management needs Qdrant
+            assert cl.get("/v1/admin/cards", headers={"X-Admin-Token": "s3cret"}).status_code == 501
         assert "cardagent_requests_total" in cl.get("/metrics").text
     get_settings.cache_clear()

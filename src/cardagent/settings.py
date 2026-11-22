@@ -42,6 +42,26 @@ class RetrievalCfg(BaseModel):
     inliers_baseline: int = 35
     inliers_full_score: int = 120
     max_align_shift: float = 0.12    # skip alignment of a detected card if H moves a corner > this × card width
+    max_candidate_refs: int = 500    # refs scored per request across the shortlisted families
+
+
+class QdrantCfg(BaseModel):
+    url: str = "http://127.0.0.1:6333"   # not "localhost": Windows tries IPv6 first (~2 s per call)
+    api_key: str = ""                # set via CARDAGENT_VECTOR_STORE__QDRANT__API_KEY
+    prefer_grpc: bool = False
+    timeout_s: float = 10
+    location: str = ""               # ":memory:" = in-process (tests); overrides url
+    path: str = ""                   # embedded on-disk mode (single process, dev only); overrides url
+    collection_prefix: str = "cardagent"
+    reference_store_dir: str = "data/reference_store"   # copies of API-uploaded reference images
+    keypoint_cache_size: int = 5000  # ORB keypoint sets cached per process (LRU)
+    refresh_seconds: float = 5       # how often a replica checks for card changes made elsewhere
+    sync_on_startup: bool = False    # sync the file registry into Qdrant when the service starts
+
+
+class VectorStoreCfg(BaseModel):
+    backend: Literal["faiss", "qdrant"] = "faiss"
+    qdrant: QdrantCfg = QdrantCfg()
 
 
 class ScoringCfg(BaseModel):
@@ -103,6 +123,7 @@ class Settings(BaseSettings):
     index_dir: str = "data/index"
     strict_index_version: bool = False
     embedder: EmbedderCfg = EmbedderCfg()
+    vector_store: VectorStoreCfg = VectorStoreCfg()
     ocr: OcrCfg = OcrCfg()
     retrieval: RetrievalCfg = RetrievalCfg()
     scoring: ScoringCfg = ScoringCfg()

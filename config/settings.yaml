@@ -4,8 +4,22 @@
 # Paths are relative to the project root unless absolute.
 
 registry_dir: registry
-index_dir: data/index
-strict_index_version: false        # true = refuse to start if the index was built for another registry version
+index_dir: data/index              # faiss backend only
+strict_index_version: false        # faiss backend: refuse to start if the index was built for another registry version
+
+vector_store:
+  backend: qdrant                  # qdrant (production: incremental add/remove, shared by replicas) | faiss (dev)
+  qdrant:
+    url: http://127.0.0.1:6333     # in docker compose: http://qdrant:6333. Not "localhost": on Windows it tries
+                                   # IPv6 ::1 first and every call waits ~2 s before falling back to IPv4
+    api_key: ""                    # set via CARDAGENT_VECTOR_STORE__QDRANT__API_KEY
+    prefer_grpc: false
+    timeout_s: 10
+    collection_prefix: cardagent   # -> cardagent_refs, cardagent_families
+    reference_store_dir: data/reference_store   # copies of API-uploaded reference images (keep on a persistent volume)
+    keypoint_cache_size: 5000
+    refresh_seconds: 5             # replicas pick up card changes made by another replica within this time
+    sync_on_startup: false         # true = sync registry/ into Qdrant at startup (single-replica / dev setups)
 
 embedder:
   kind: dinov2_onnx                    # classic (no model, CPU) | dinov2_onnx (recommended for production)
@@ -34,6 +48,7 @@ retrieval:
   inliers_full_score: 120          # inliers that count as a perfect geometric match (calibrate on real refs)
   max_align_shift: 0.12            # card already detected+rectified: ignore a homography that moves a corner more
                                    # than this fraction of card width (good alignments <0.10, bad ones extrapolate)
+  max_candidate_refs: 500          # reference images scored per request across the shortlisted card families
 
 scoring:
   family_weights: {text: 0.40, embed: 0.20, geometry: 0.30, colour: 0.10}

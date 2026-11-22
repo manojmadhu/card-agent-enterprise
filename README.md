@@ -7,26 +7,43 @@ fields, validates them, and returns a strict JSON decision: `ACCEPT` / `REVIEW` 
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Deployment, GPU sizing (NVIDIA T4), onboarding cards, runbook: [docs/OPERATIONS.md](docs/OPERATIONS.md)
 
-## Quick start (CPU, no model downloads)
+## Quick start (CPU)
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt pytest httpx      # + OS package: tesseract-ocr tesseract-ocr-ara
+pip install -e ".[dev]"                           # + OS package: tesseract-ocr tesseract-ocr-ara
+docker run -d --name cardagent-qdrant -p 127.0.0.1:6333:6333 \
+  -v cardagent_qdrant:/qdrant/storage qdrant/qdrant:v1.18.1          # vector store
 python tools/make_samples.py                      # SYNTHETIC registry refs + test photos
-python tools/build_index.py --force               # validate registry, build reference index
+python tools/build_index.py                       # validate registry, sync it into Qdrant (incremental)
 python tools/evaluate.py --today 2026-11-18       # scorecard + PASS/FAIL gate
-pytest -q                                         # 20 tests
-make run                                          # API on :8080
-curl -F image=@data/samples/fazaa_gold.jpg -F request_id=abc http://localhost:8080/v1/cards/validate
+pytest -q                                         # no Qdrant server needed (in-process Qdrant for its tests)
+uvicorn cardagent.api.app:app --port 8080         # API
+curl -F image=@data/samples/fazaa_gold.jpg http://127.0.0.1:8080/v1/cards/validate
 ```
+No Docker? Set `vector_store.backend: faiss` in `config/settings.yaml` (file index, no card-management API).
 
 ## API
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/v1/cards/validate` | multipart `image` (jpeg/png/webp ≤ 8 MB) + optional `request_id` (idempotent: a retry with the same id **and** same image returns the cached result; a different image is always processed) |
 | GET | `/v1/registry` | loaded families/variants/reference counts + registry version |
-| POST | `/v1/admin/registry/reload` | header `X-Admin-Token`; validates + rebuilds index, atomic swap, keeps old version on failure |
-| GET | `/health/live`, `/health/ready` | liveness / readiness (registry, embedder, OCR, VLM status) |
+| GET | `/health/live`, `/health/ready` | liveness / readiness (vector store, registry, embedder, OCR, VLM status) |
 | GET | `/metrics` | Prometheus |
+
+**Card management** (header `X-Admin-Token`; Qdrant backend). Each call touches only that card — no re-index:
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/v1/admin/cards` | all card families with owner (`registry`/`api`) and reference counts |
+| GET | `/v1/admin/cards/{family_id}` | definition + reference images (ids) per variant |
+| PUT | `/v1/admin/cards/{family_id}` | create (201) / replace (200) a definition; JSON or YAML body, same schema as `registry/cards/*.yaml` |
+| DELETE | `/v1/admin/cards/{family_id}` | remove the card and all its reference vectors |
+| POST | `/v1/admin/cards/{family_id}/variants/{variant_id}/references` | multipart `images` (1–20); embedded and indexed immediately; re-upload = no-op |
+| DELETE | `/v1/admin/cards/{family_id}/references/{ref_id}` | remove one reference image |
+| POST | `/v1/admin/cards/sync` | incremental sync from `registry/` (same as `tools/build_index.py`) |
+| POST | `/v1/admin/registry/reload` | re-read definitions now (replicas also poll every `refresh_seconds`) |
+
+Registry-owned cards answer `409` to API changes unless `?force=true` — see [OPERATIONS §4](docs/OPERATIONS.md).
 
 Output contract: `src/cardagent/schemas.py` (`python -m cardagent.schemas` prints the JSON Schema).
 
@@ -39,14 +56,15 @@ src/cardagent/
   agent.py                    orchestrator + hot-reloadable engine state
   vision/                     quality gate, card detection/warp, colour, ORB + RANSAC
   embed/                      ClassicEmbedder (no model) | Dinov2OnnxEmbedder (production)
-  index/                      FAISS vector index + keypoints + keyword inverted index (cached per version)
+  store/                      card store: Qdrant (production) | FAISS (dev), keyword index, incremental sync
+  index/                      FAISS file index (faiss backend)
   ocr/                        Tesseract | PaddleOCR (local models only)
   pipeline/                   identify (2-stage), extract (homography-aligned), rules
   vlm/                        self-hosted VLM fallback (Ollama / OpenAI-compatible) + circuit breaker
-  api/                        FastAPI app
+  api/                        FastAPI app + card management router (admin_cards.py)
   observability/              metrics, JSON logs, PII masking
 tools/                        make_samples, build_index, evaluate (CI gate), export_dinov2_onnx
-deploy/                       Dockerfile (CPU), Dockerfile.gpu (T4), docker-compose.yml (agent + VLM)
+deploy/                       Dockerfile (CPU), Dockerfile.gpu (T4), docker-compose.yml (Qdrant + sync + agent + VLM)
 ```
 
 ## Results on the synthetic data (this repo, CPU, classic embedder)

@@ -15,7 +15,8 @@ image ─► [1] quality gate ─► [2] detect + warp card ─► [3] full-card
                     │ global embedding   ORB keypoints   body colour (Lab)  │
                     └───────────────────────────────────────────────────────┘
  [4] IDENTIFY — stage 1 (recall):   vector top-k over ALL references  ∪  keyword inverted index
-               stage 2 (precision): ORB + RANSAC on ≤24 shortlisted refs (2 per variant)
+               stage 2 (precision): filtered vector query = similarity to every ref of the shortlisted
+                                    families; ORB + RANSAC on ≤24 of them (2 per variant)
                family score = w·(text, embed, geometry, colour); needs score ≥ min AND margin ≥ δ
                variant score (inside family) = colour, variant keyword, geometry, embed, number prefix
  [5] ALIGN to best reference with its homography  →  YAML regions land on exact pixels
@@ -37,18 +38,28 @@ image ─► [1] quality gate ─► [2] detect + warp card ─► [3] full-card
 | VLM only as fallback, output re-validated | VLMs can hallucinate plausible numbers; regex + rules have the final word; VLM-sourced fields force REVIEW. |
 | `lookup` rule hook | Reading a card ≠ proving it is active. Register an issuer verifier when available. |
 
-## 3. Registry and versioning
-* `registry/cards/<cc>/<programme>.yaml` — validated by `registry/models.py` (pydantic): id format, ROI bounds, regex compiles, rules reference real fields, unique variants.
-* `registry/refs/<family>/<variant>/*` — reference images.
-* **Registry version** = SHA-256 over every YAML *and* every reference image; stamped on each result.
-* **Index cache** at `data/index/<registry_version>__<embedder>__<format>/` (FAISS + keypoints + metadata); never reused across versions/embedders/index formats.
-* **Hot reload**: build a complete new state off to the side → single reference swap; in-flight requests finish on the state they started with; failures keep the old state (`422`, metric `cardagent_registry_reloads_total{result="failed"}`).
+## 3. Card store, registry and versioning
+Two backends behind one interface (`src/cardagent/store/`), selected by `vector_store.backend`:
+
+| | **qdrant** (production) | **faiss** (dev / single process) |
+|---|---|---|
+| Vectors | `cardagent_refs` collection: one point per reference image (cosine), payload `family`, `variant`, `country`, `sha256`, `source`, ORB keypoints (on disk) | `data/index/<version>__<embedder>__<format>/` files |
+| Card definitions | `cardagent_families` collection (validated JSON) + a `meta` point (revision, embedder, dim) | `registry/cards/**/*.yaml` |
+| Add / remove a card | only that card's points (seconds); admin API or incremental sync | full rebuild of the file index |
+| Replicas | all share one Qdrant; each polls the revision every `refresh_seconds` | each process builds its own copy |
+| Version on results | Qdrant revision (changes on every write) | SHA-256 over every YAML and reference image |
+
+* **Point ids are content addressed**: `uuid5(family/variant/sha256(image))`. Re-adding an image is a no-op; an image never gets two vectors.
+* **Ownership**: every family has `source = registry | api`. `tools/build_index.py` (or `POST /v1/admin/cards/sync`) syncs `registry/` incrementally and never modifies or prunes API-owned cards. The API refuses (409) to change registry-owned cards unless `?force=true`.
+* **ROI changes** re-extract keypoints for that family only (personal-data regions are masked out of reference keypoints); vectors are untouched. **Embedder changes** require `build_index.py --reembed` (the service refuses to start on a mismatch).
+* `registry/cards/<cc>/<programme>.yaml` — validated by `registry/models.py` (pydantic): id format, ROI bounds, regex compiles, rules reference real fields, unique variants. The API validates definitions with the same model.
+* **Hot reload**: a new snapshot is built off to the side → single reference swap; in-flight requests finish on the state they started with; failures keep the old state (`422`, metric `cardagent_registry_reloads_total{result="failed"}`).
 
 ## 4. Models (all self-hosted)
 | Role | Default (dev/CI) | Production | License |
 |---|---|---|---|
 | Global embedding | Classic (Lab layout + HOG), no weights | DINOv2 ViT-S/14 via ONNX Runtime (CUDA) | Apache-2.0 |
-| Vector index | FAISS IndexFlatIP (exact) | same; IndexHNSWFlat beyond ~100k refs | MIT |
+| Vector store | FAISS IndexFlatIP (exact, file) | Qdrant 1.18 (self-hosted; HNSW, filtered search, snapshots, replication) | MIT / Apache-2.0 |
 | Local features | OpenCV ORB + RANSAC | same | Apache-2.0 |
 | OCR | Tesseract 5 (eng+ara) | PaddleOCR (GPU) or Tesseract | Apache-2.0 |
 | VLM fallback | off | Qwen2.5-VL-7B (4-bit) via Ollama/llama.cpp | Apache-2.0 (7B; verify model card) |

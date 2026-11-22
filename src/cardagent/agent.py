@@ -1,8 +1,10 @@
 """CardAgent: orchestrates all stages and owns hot-reloadable engine state.
 
-Hot reload builds a complete new EngineState (registry + index) off to the side and swaps a
-single reference. Requests in flight keep the state they started with; a failed reload
-leaves the current state untouched.
+Engine state is a StoreSnapshot (card definitions + keyword index + a read view of the reference
+vectors) taken from the card store. A reload builds a new snapshot off to the side and swaps a
+single reference: requests in flight keep the state they started with, and a failed reload leaves
+the current state untouched. With the Qdrant backend, every replica checks the store revision
+every `refresh_seconds` and reloads only when cards were added/changed/removed elsewhere.
 """
 from __future__ import annotations
 
@@ -10,7 +12,6 @@ import logging
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import date
 
 import cv2
@@ -18,24 +19,18 @@ import numpy as np
 
 from . import __version__
 from .embed.embedders import Embedder, build_embedder
-from .index.reference_index import ReferenceIndex, build_or_load
 from .observability import telemetry as tm
 from .ocr.engines import OcrEngine, build_ocr
 from .pipeline import extract, identify, rules
-from .registry.store import RegistrySnapshot, load_registry
 from .schemas import ValidationResult
 from .settings import PROJECT_ROOT, Settings
+from .store.base import StoreSnapshot
+from .store.factory import build_store
 from .vision import normalise, quality
 from .vision.features import body_colour_rgb, extract_keypoints
 from .vlm.client import VlmClient
 
 log = logging.getLogger(__name__)
-
-
-@dataclass
-class EngineState:
-    snapshot: RegistrySnapshot
-    index: ReferenceIndex
 
 
 class CardAgent:
@@ -44,35 +39,46 @@ class CardAgent:
         self.embedder: Embedder = build_embedder(settings.embedder, PROJECT_ROOT)
         self.ocr: OcrEngine = build_ocr(settings.ocr, PROJECT_ROOT)
         self.vlm = VlmClient(settings.vlm) if settings.vlm.enabled else None
+        self.store = build_store(settings, self.embedder)
+        if self.store.backend == "qdrant" and settings.vector_store.qdrant.sync_on_startup:
+            from .store.sync import sync_registry
+            log.info("registry sync on startup: %s", sync_registry(self.store, self.s.path(self.s.registry_dir)))
         self._reload_lock = threading.Lock()
-        self.state: EngineState = self._build_state()
+        self._last_check = time.monotonic()
+        self.state: StoreSnapshot = self.store.snapshot()
+        tm.REGISTRY_INFO.set(self.state.ref_count)
 
     # ------------------------------------------------------------------ registry
-    def _build_state(self, force_index: bool = False) -> EngineState:
-        snap = load_registry(self.s.path(self.s.registry_dir))
-        idx = build_or_load(snap, self.embedder, self.s.path(self.s.index_dir),
-                            self.s.retrieval.orb_features, force=force_index)
-        if self.s.strict_index_version and idx.registry_version != snap.version:
-            raise RuntimeError("index/registry version mismatch")
-        tm.REGISTRY_INFO.set(len(idx.entries))
-        return EngineState(snap, idx)
-
-    def reload(self) -> dict:
+    def reload(self, rebuild: bool = False) -> dict:
         with self._reload_lock:
             try:
-                new = self._build_state()
+                new = self.store.snapshot(rebuild=rebuild)
             except Exception:
                 tm.RELOADS.labels("failed").inc()
-                log.exception("registry reload failed; keeping version %s", self.state.snapshot.version)
+                log.exception("registry reload failed; keeping version %s", self.state.version)
                 raise
-            old = self.state.snapshot.version
+            old = self.state.version
             self.state = new                                   # atomic reference swap
+            self._last_check = time.monotonic()
             tm.RELOADS.labels("ok").inc()
-            log.info("registry reloaded %s -> %s", old, new.snapshot.version)
-            return new.snapshot.summary()
+            tm.REGISTRY_INFO.set(new.ref_count)
+            if old != new.version:
+                log.info("registry reloaded %s -> %s", old, new.version)
+            return new.summary()
+
+    def refresh_if_changed(self, force: bool = False) -> None:
+        """Qdrant backend: pick up card changes made by any replica (cheap revision check)."""
+        if self.store.backend != "qdrant":
+            return
+        if not force and time.monotonic() - self._last_check < self.s.vector_store.qdrant.refresh_seconds:
+            return
+        self._last_check = time.monotonic()
+        if self.store.current_version() != self.state.version:
+            self.reload()
 
     # ------------------------------------------------------------------ main entry
     def process(self, image_bytes: bytes, request_id: str | None = None, today: date | None = None) -> dict:
+        self.refresh_if_changed()
         st = self.state                                        # pin state for this request
         t0 = time.perf_counter()
         timings: dict[str, int] = {}
@@ -84,7 +90,7 @@ class CardAgent:
             return time.perf_counter()
 
         out = {"request_id": request_id or str(uuid.uuid4()), "status": "REJECT", "reasons": [],
-               "model_versions": {"pipeline": __version__, "registry": st.snapshot.version,
+               "model_versions": {"pipeline": __version__, "registry": st.version,
                                   "embedder": self.embedder.name, "ocr": self.ocr.name,
                                   **({"vlm": self.s.vlm.model} if self.vlm else {})}}
 
@@ -101,7 +107,7 @@ class CardAgent:
 
         card, ninfo = normalise.normalise(img)
         t = lap("normalise", t)
-        card, full, rotation = self._ocr_orientation(card, st.index)
+        card, full, rotation = self._ocr_orientation(card, st.keywords)
         q.update(card_detected=ninfo["card_detected"], detector=ninfo["detector"], rotation=rotation)
         t = lap("ocr_full", t)
 
@@ -110,7 +116,7 @@ class CardAgent:
         qcol = body_colour_rgb(card)
         t = lap("features", t)
 
-        ident = identify.identify(st.index, st.snapshot.families, full, qvec, qkp, qcol,
+        ident = identify.identify(st.refs, st.keywords, st.families, full, qvec, qkp, qcol,
                                   self.s.retrieval, self.s.scoring, self.s.embedder.similarity_floor)
         t = lap("identify", t)
         out["candidates"] = {"family": ident.family_candidates}
@@ -120,7 +126,7 @@ class CardAgent:
             status = "REJECT" if ident.family_score < sc.reject_below else "REVIEW"
             return self._finish(out, status, [reason], t0, timings)
 
-        fam = st.snapshot.families[ident.family_id]
+        fam = st.families[ident.family_id]
         v = fam.variant(ident.variant_id)
         out["candidates"]["variant"] = ident.variant_candidates
         out["card"] = {"family": fam.id, "family_name": fam.name, "country": fam.country, "issuer": fam.issuer,
@@ -157,12 +163,12 @@ class CardAgent:
         return self._finish(out, status, reasons, t0, timings)
 
     # ------------------------------------------------------------------ helpers
-    def _ocr_orientation(self, card, idx: ReferenceIndex):
+    def _ocr_orientation(self, card, keywords):
         best = None
         for rot in (0, 180):
             img = card if rot == 0 else cv2.rotate(card, cv2.ROTATE_180)
             o = self.ocr.read_full(img)
-            kw = max(idx.keyword_families(o["tokens"], o["text"]).values(), default=0.0)
+            kw = max(keywords.keyword_families(o["tokens"], o["text"]).values(), default=0.0)
             score = kw + 0.1 * o["mean_conf"]
             if best is None or score > best[0]:
                 best = (score, img, o, rot)

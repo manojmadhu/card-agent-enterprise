@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 NormaliseKind = Literal["digits", "upper", "alnum", "date_mm_yy", "date_dd_mm_yyyy", "emirates_id", "none"]
 RuleKind = Literal["regex", "not_expired", "emirates_id_format", "luhn", "prefix_matches_variant",
-                   "length", "lookup"]
+                   "length", "lookup", "date_order"]   # date_order: field <= params.other_field
 
 
 class FieldSpec(BaseModel):
@@ -84,6 +84,8 @@ class CardFamily(BaseModel):
         for r in self.rules:
             if r.field not in names:
                 raise ValueError(f"{self.id}: rule {r.type} refers to unknown field '{r.field}'")
+            if r.type == "date_order" and r.params.get("other_field") not in names:
+                raise ValueError(f"{self.id}: date_order rule needs params.other_field naming a field")
         return self
 
     def variant(self, vid: str | None) -> Variant | None:

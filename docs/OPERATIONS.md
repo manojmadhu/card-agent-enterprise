@@ -95,6 +95,12 @@ from `registry/` are owned by Git: the API answers `409` for changes unless `?fo
 removed too). Every admin action is written to the JSON log (`"event": "card_admin"`).
 Run the evaluation gate after API changes too, before relying on automatic ACCEPTs for the new card.
 
+### From the Card Agent Console
+The web console manages cards through `/console/v1` (see [CONSOLE_API.md](CONSOLE_API.md)). On Qdrant it uses
+the same card store and ownership rule as `/v1/admin/cards`: cards it creates are API-owned; editing a
+registry-owned card returns 409 until it is forced (`?force=true`). On FAISS it edits `registry/` files and
+keeps replaced or deleted files under `registry/.deleted/` — commit console-made changes to git yourself.
+
 ## 5. Calibration and the evaluation gate
 `tools/evaluate.py` reports: status agreement, **ACCEPT precision** (share of accepts that were
 correct card + correct fields), automation rate, per-field accuracy, family confusion, latency p50/p95.

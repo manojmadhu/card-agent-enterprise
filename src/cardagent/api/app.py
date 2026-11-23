@@ -9,6 +9,7 @@ from threading import Lock
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -18,7 +19,7 @@ from ..observability.telemetry import audit_record, setup_logging
 from ..schemas import ValidationResult
 from ..settings import get_settings
 from ..store.base import StoreUnavailable
-from . import admin_cards
+from . import admin_cards, console
 from .deps import STATE, agent, require_admin
 
 log = logging.getLogger("cardagent.api")
@@ -62,6 +63,12 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Card Validation Agent", version=__version__, lifespan=lifespan)
 app.include_router(admin_cards.router)
+app.include_router(console.router)
+
+if get_settings().console.cors_origins:                 # opt-in: only when the console runs on another origin
+    app.add_middleware(CORSMiddleware, allow_origins=get_settings().console.cors_origins,
+                       allow_methods=["GET", "POST", "PUT", "DELETE"],
+                       allow_headers=["Content-Type", "X-Admin-Token"])
 
 
 @app.exception_handler(StoreUnavailable)
@@ -71,9 +78,8 @@ async def _store_unavailable(_req: Request, exc: StoreUnavailable):
                         headers={"Retry-After": "5"})
 
 
-@app.post("/v1/cards/validate", response_model=ValidationResult)
-async def validate(image: UploadFile = File(...), request_id: str | None = Form(None),
-                   a: CardAgent = Depends(agent)):
+async def run_validation(image: UploadFile, request_id: str | None, a: CardAgent) -> dict:
+    """Shared by /v1/cards/validate and the console API (/console/v1/cards/validate)."""
     s = get_settings()
     if image.content_type not in s.api.allowed_content_types:
         raise HTTPException(415, f"unsupported content type {image.content_type}")
@@ -89,6 +95,15 @@ async def validate(image: UploadFile = File(...), request_id: str | None = Form(
         cache.put(key, result)
     log.info("decision", extra={"extra_json": audit_record(result, s.logging.mask_pii)})
     return result
+
+
+STATE["run_validation"] = run_validation
+
+
+@app.post("/v1/cards/validate", response_model=ValidationResult)
+async def validate(image: UploadFile = File(...), request_id: str | None = Form(None),
+                   a: CardAgent = Depends(agent)):
+    return await run_validation(image, request_id, a)
 
 
 @app.get("/v1/registry")

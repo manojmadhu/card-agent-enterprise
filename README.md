@@ -45,6 +45,10 @@ No Docker? Set `vector_store.backend: faiss` in `config/settings.yaml` (file ind
 
 Registry-owned cards answer `409` to API changes unless `?force=true` — see [OPERATIONS §4](docs/OPERATIONS.md).
 
+**Card Agent Console** (card-agent-web): set the console's API base URL to `http://<host>:8080/console/v1`.
+That API speaks the console's MVP formats (family YAML, result envelope) on top of the same pipeline and card
+store; `/v1` is unchanged. Routes, translation rules and security: [docs/CONSOLE_API.md](docs/CONSOLE_API.md).
+
 Output contract: `src/cardagent/schemas.py` (`python -m cardagent.schemas` prints the JSON Schema).
 
 ## Project layout

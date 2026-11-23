@@ -64,6 +64,14 @@ class VectorStoreCfg(BaseModel):
     qdrant: QdrantCfg = QdrantCfg()
 
 
+class ConsoleCfg(BaseModel):
+    """Compatibility API for the Card Agent Console (card-agent-web), mounted at /console/v1."""
+    enabled: bool = True
+    default_country: str = "ae"          # country for families the console creates (console ids have none)
+    require_admin_token: bool = True     # writes need X-Admin-Token; false = no auth (local dev only)
+    cors_origins: list[str] = []         # browser origins allowed to call the API, e.g. http://localhost:5173
+
+
 class ScoringCfg(BaseModel):
     family_weights: dict[str, float] = {"text": 0.40, "embed": 0.20, "geometry": 0.30, "colour": 0.10}
     variant_weights: dict[str, float] = {"colour": 0.40, "keyword": 0.25, "geometry": 0.15,
@@ -124,6 +132,7 @@ class Settings(BaseSettings):
     strict_index_version: bool = False
     embedder: EmbedderCfg = EmbedderCfg()
     vector_store: VectorStoreCfg = VectorStoreCfg()
+    console: ConsoleCfg = ConsoleCfg()
     ocr: OcrCfg = OcrCfg()
     retrieval: RetrievalCfg = RetrievalCfg()
     scoring: ScoringCfg = ScoringCfg()

@@ -82,6 +82,16 @@ def run_rules(fam: CardFamily, variant_id: str | None, fields: dict, today: date
             if v and v.number_prefix:
                 res = "pass" if val.startswith(v.number_prefix) else "fail"
                 detail = None if res == "pass" else "NUMBER_PREFIX_VARIANT_MISMATCH"
+        elif rule.type == "date_order":                     # e.g. issue_date must not be after expiry_date
+            other = (fields.get(rule.params.get("other_field")) or {}).get("value")
+            a, b = parse_expiry(val), parse_expiry(other)
+            if other is None:
+                res, detail = "skip", "OTHER_FIELD_MISSING"
+            elif a is None or b is None:
+                res, detail = "fail", "UNPARSEABLE_DATE"
+            else:
+                res = "pass" if a <= b else "fail"
+                detail = None if res == "pass" else f"DATE_ORDER {rule.field}>{rule.params['other_field']}"
         elif rule.type == "lookup":
             fn = VERIFIERS.get(fam.id)
             if fn is None:

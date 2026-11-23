@@ -78,14 +78,21 @@ async def _store_unavailable(_req: Request, exc: StoreUnavailable):
                         headers={"Retry-After": "5"})
 
 
-async def run_validation(image: UploadFile, request_id: str | None, a: CardAgent) -> dict:
-    """Shared by /v1/cards/validate and the console API (/console/v1/cards/validate)."""
+async def read_upload(image: UploadFile) -> bytes:
+    """Upload checks shared by every validate endpoint: content type and size."""
     s = get_settings()
     if image.content_type not in s.api.allowed_content_types:
         raise HTTPException(415, f"unsupported content type {image.content_type}")
     data = await image.read(s.api.max_image_bytes + 1)
     if len(data) > s.api.max_image_bytes:
         raise HTTPException(413, "image too large")
+    return data
+
+
+async def run_validation(image: UploadFile, request_id: str | None, a: CardAgent) -> dict:
+    """Shared by /v1/cards/validate and the console API (/console/v1/cards/validate)."""
+    s = get_settings()
+    data = await read_upload(image)
     cache = STATE["cache"]
     key = (request_id, hashlib.sha256(data).hexdigest()) if request_id else None
     if key and (hit := cache.get(key)) is not None:
@@ -98,6 +105,7 @@ async def run_validation(image: UploadFile, request_id: str | None, a: CardAgent
 
 
 STATE["run_validation"] = run_validation
+STATE["read_upload"] = read_upload
 
 
 @app.post("/v1/cards/validate", response_model=ValidationResult)

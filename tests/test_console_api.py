@@ -257,3 +257,91 @@ def test_console_api_can_be_disabled(faiss_api, monkeypatch):
     get_settings.cache_clear()
     assert cl.get("/console/v1/registry").status_code == 404
     assert cl.get("/v1/registry").status_code == 200
+
+
+# ------------------------------------------------------------------------------ streaming validation (SSE)
+def _sse_events(text):
+    import json
+    out = []
+    for block in text.strip().split("\n\n"):
+        ev = data = None
+        for line in block.split("\n"):
+            if line.startswith("event: "):
+                ev = line[7:]
+            elif line.startswith("data: "):
+                data = json.loads(line[6:])
+        out.append((ev, data))
+    return out
+
+
+def _stream(cl, name, mode="delta"):
+    with open(SAMPLES / name, "rb") as fh:
+        r = cl.post(f"/console/v1/cards/validate/stream?mode={mode}",
+                    files={"image": ("card.jpg", fh, "image/jpeg")}, data={"request_id": "stream_1"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    return _sse_events(r.text)
+
+
+STEP_IDS = ["ingest", "quality", "normalise", "ocr", "embed", "search", "family", "variant", "fields", "rules", "decision"]
+
+
+@needs_samples
+def test_stream_matches_browser_engine_format(faiss_api):
+    cl, _ = faiss_api
+    assert [s["id"] for s in cl.get("/console/v1/pipeline/steps").json()["steps"]] == STEP_IDS
+    evs = _stream(cl, "fazaa_gold.jpg")
+    kinds = [e for e, _ in evs]
+    assert kinds[0] == "snapshot" and kinds[-1] == "result" and "image" in kinds
+    first = evs[0][1]["steps"]
+    assert [s["id"] for s in first] == STEP_IDS and {s["status"] for s in first} == {"pending"}
+    started = [d["id"] for e, d in evs if e == "step" and d["status"] == "running"]
+    assert started[:5] == ["ingest", "quality", "normalise", "ocr", "embed"]          # live, in pipeline order
+    for _, d in evs:
+        if _ == "step":
+            assert set(d) == {"id", "status", "summary", "ms", "detail"}               # StepState shape
+    final = evs[-1][1]
+    steps = {s["id"]: s for s in final["steps"]}
+    assert final["result"]["status"] == "ACCEPT" and final["result"]["card"]["family"] == "fazaa"
+    assert final["normalisedUrl"].startswith("data:image/jpeg;base64,")
+    assert all(s["status"] in ("pass", "warn") for s in steps.values()), steps
+    assert {"metrics", "checks"} <= set(steps["quality"]["detail"])
+    assert steps["search"]["detail"]["top"][0]["family"] == "fazaa"
+    fam = steps["family"]["detail"]
+    assert fam["outcome"] == "decided" and {"family", "name", "text", "visual", "colour", "score"} <= set(fam["candidates"][0])
+    assert {"variant", "colour", "keyword", "prefix", "score"} <= set(steps["variant"]["detail"]["candidates"][0])
+    assert {f["name"] for f in steps["fields"]["detail"]["fields"]} == {"holder_name", "card_number", "expiry_date"}
+    assert steps["embed"]["detail"]["vector"] and len(steps["embed"]["detail"]["vector"]) <= 768
+    assert steps["decision"]["detail"]["status"] == "ACCEPT"
+
+    plain = _validate(cl, "fazaa_gold.jpg", "plain_1")                                  # same decision as non-stream
+    assert (plain["status"], plain["card"]["variant"], plain["fields"]["card_number"]["value"]) == \
+           (final["result"]["status"], final["result"]["card"]["variant"],
+            final["result"]["fields"]["card_number"]["value"])
+
+
+@needs_samples
+def test_stream_early_exits_and_snapshot_mode(faiss_api):
+    cl, _ = faiss_api
+    blurry = {s["id"]: s for s in _stream(cl, "fazaa_blurry.jpg")[-1][1]["steps"]}
+    assert blurry["quality"]["status"] == "fail" and blurry["ocr"]["status"] == "skip"
+    assert blurry["decision"]["detail"]["reasons"][0] == "RETAKE_REQUIRED"
+    unknown = _stream(cl, "unknown_card.jpg", mode="snapshot")
+    assert all(e == "snapshot" for e, _ in unknown[:-1]) and unknown[-1][0] == "result"
+    assert all(len(d["steps"]) == 11 for _, d in unknown)                               # full snapshots
+    steps = {s["id"]: s for s in unknown[-1][1]["steps"]}
+    assert steps["family"]["status"] == "fail" and steps["variant"]["summary"].startswith("skipped")
+    assert unknown[-1][1]["result"]["reasons"] == ["UNKNOWN_CARD"]
+
+
+@needs_samples
+def test_trace_hook_does_not_change_the_result():
+    from cardagent.agent import CardAgent
+    get_settings.cache_clear()
+    a = CardAgent(get_settings())
+    img = (SAMPLES / "esaad_gold.jpg").read_bytes()
+    events = []
+    plain = a.process(img, "x", date(2026, 11, 23))
+    traced = a.process(img, "x", date(2026, 11, 23), trace=lambda *e: events.append(e[:2]))
+    drop = lambda r: {k: v for k, v in r.items() if k not in ("timings_ms", "processing_ms")}  # noqa: E731
+    assert drop(plain) == drop(traced)
+    assert ("start", "ingest") in events and ("done", "rules") in events

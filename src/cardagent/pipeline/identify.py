@@ -13,6 +13,7 @@ depends on the shortlisted families, never on the total number of cards.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -66,7 +67,10 @@ def _decide(cands: list[dict], min_score: float, margin: float) -> tuple[bool, f
 
 def identify(refs_view: RefView, keywords: KeywordIndex, families: dict[str, CardFamily], ocr: dict,
              qvec: np.ndarray, qkp: Keypoints, qcolour, rcfg: RetrievalCfg, scfg: ScoringCfg,
-             sim_floor: float) -> Identification:
+             sim_floor: float, trace: dict | None = None) -> Identification:
+    """trace (optional): filled with the intermediate evidence (shortlist, keyword hits, verified
+    references, per-sub-stage timings) for step-by-step views such as the console's stream."""
+    t0 = time.perf_counter()
     tokens, text = ocr["tokens"], ocr["text"]
     nn = refs_view.search(qvec, rcfg.shortlist_refs)                # stage-1 vector shortlist
     kw_hits = keywords.keyword_families(tokens, text)               # stage-1 keyword shortlist
@@ -91,6 +95,7 @@ def identify(refs_view: RefView, keywords: KeywordIndex, families: dict[str, Car
     to_verify = to_verify[:rcfg.max_verify_refs]
     kps = refs_view.keypoints(to_verify)
     geo: dict[str, GeoMatch] = {i: verify(qkp, kps[i], rcfg.ratio_test) for i in to_verify if i in kps}
+    t_search = time.perf_counter()
 
     def geo_score(inl: int) -> float:
         # inliers at or below the baseline are what two cards sharing a template/font produce
@@ -120,6 +125,20 @@ def identify(refs_view: RefView, keywords: KeywordIndex, families: dict[str, Car
                                       "geometry": round(s_geo, 3), "colour": round(s_col, 3)}})
     fam_cands.sort(key=lambda c: -c["score"])
     decided, margin = _decide(fam_cands, scfg.family_min, scfg.family_margin)
+    t_family = time.perf_counter()
+    if trace is not None:
+        best_sim: dict[str, float] = {}
+        for h in hits:
+            best_sim[h.family_id] = max(best_sim.get(h.family_id, 0.0), h.score)
+        trace.update(
+            shortlist=[{"ref_id": h.ref_id, "family": h.family_id, "variant": h.variant_id,
+                        "sim": round(h.score, 4)} for h in nn],
+            keyword_hits={k: round(v, 3) for k, v in kw_hits.items()}, negative_hits=sorted(negatives),
+            candidate_families=sorted(cand_fams), refs_scored=len(hits), family_best_sim=best_sim,
+            verified=[{"ref_id": i, "family": ref_family[i], "variant": ref_variant[i], "inliers": g.inliers,
+                       "good_matches": g.good_matches} for i, g in sorted(geo.items(), key=lambda x: -x[1].inliers)],
+            weights=w, text_missing=text_missing, margin=margin,
+            ms={"search": int((t_search - t0) * 1000), "family": int((t_family - t_search) * 1000)})
     res = Identification(decided, fam_cands[0]["id"] if decided else None,
                          fam_cands[0]["score"] if fam_cands else 0.0, margin, fam_cands[:5],
                          refs_verified=len(geo))
@@ -144,7 +163,11 @@ def identify(refs_view: RefView, keywords: KeywordIndex, families: dict[str, Car
                           "signals": {"colour": round(s_col, 3), "keyword": round(s_kw, 3),
                                       "geometry": round(s_geo, 3), "embed": round(s_emb, 3), "prefix": s_pre}})
     var_cands.sort(key=lambda c: -c["score"])
-    vdec, _ = _decide(var_cands, scfg.variant_min, scfg.variant_margin)
+    vdec, vmargin = _decide(var_cands, scfg.variant_min, scfg.variant_margin)
+    if trace is not None:
+        trace["variant_margin"] = vmargin
+        trace["number_seen"] = digits[0] if digits else None
+        trace["ms"]["variant"] = int((time.perf_counter() - t_family) * 1000)
     res.variant_decided, res.variant_candidates = vdec, var_cands
     res.variant_id = var_cands[0]["id"] if vdec else None
     res.variant_score = var_cands[0]["score"]

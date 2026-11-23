@@ -33,6 +33,13 @@ Called by the console today:
 | POST | `/registry/reload` | after saving a family | 🔒 |
 | PUT | `/registry/families/{id}` | Family editor → Save | 🔒 console YAML (`application/yaml`) or JSON; validated against the console's schema, then the enterprise schema |
 
+Live step-by-step validation (the console's *Validate a card* timeline):
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/cards/validate/stream` | same input as `/cards/validate`; answers `text/event-stream` (see *Streaming*) |
+| GET | `/pipeline/steps` | the 11 step ids / titles / stage numbers |
+
 For the family editor and reference-card pages:
 
 | Method | Path | Notes |
@@ -51,6 +58,64 @@ For the family editor and reference-card pages:
 * `quality` is always an object (zeros for an unreadable upload).
 * `card.family` uses the console id; `card.enterprise_family` keeps `ae.fazaa`. For an ambiguous
   family the top candidate is returned as `card` with `provisional: true` (the decision stays REVIEW).
+
+## Streaming (`/cards/validate/stream`)
+The console's browser engine (`runPipeline` in `src/engine/pipeline.ts`) yields snapshots
+`{steps: StepState[], normalisedUrl?, result?}` over 11 steps:
+`ingest → quality → normalise → ocr → embed → search → family → variant → fields → rules → decision`,
+with `StepState = {id, status: pending|running|pass|warn|fail|skip, summary, ms, detail}`.
+The stream emits **the same objects from a real server run**, with the same `detail` shape per step
+(quality `metrics`+`checks`, OCR `tokens`, embed `vector`+`body_rgb`, search `top`/`best`/`floor`,
+family/variant `candidates` with `tau`/`delta`/`margin`/`outcome`, `fields`, rule `results`, decision).
+
+| Event (`mode=delta`, default) | Data |
+|---|---|
+| `snapshot` | first event: all 11 steps `pending` |
+| `step` | one `StepState`, each time a step starts (`running`) or finishes |
+| `image` | `{normalisedUrl}` — the straightened card (JPEG data URL), once |
+| `result` | final full snapshot `{steps, normalisedUrl, result}`; `result` = the `/cards/validate` envelope |
+| `error` | `{detail}` if the run fails after the stream started |
+
+`mode=snapshot` sends a full snapshot on every event (exactly what `runPipeline` yields; more bytes).
+Server-side differences from the browser engine, shown in the evidence panels:
+* `search` is the enterprise two-stage search: vector shortlist + keyword index, then ORB+RANSAC
+  verification (`detail.verified` with inliers); `family` candidates carry an extra `geometry` signal.
+* OCR returns words without per-word boxes or confidences (each token gets the mean confidence).
+* `search`, `family` and `variant` are computed in one call; their `ms` are measured inside it.
+* The embedding vector is capped at 768 values (`vector_truncated: true` when longer).
+
+**Console client** — add to `src/engine/api.ts`; it yields snapshots exactly like `runPipeline`, so
+the *Validate a card* page can feed it to the same consumer loop it uses for the browser engine:
+```ts
+export async function* validateStream(base: string, image: Blob, requestId: string) {
+  const form = new FormData();
+  form.append("image", image, "card.jpg");
+  form.append("request_id", requestId);
+  const res = await fetch(`${base}/cards/validate/stream`, { method: "POST", body: form });
+  if (!res.ok || !res.body) throw new Error(`validate failed: HTTP ${res.status}`);
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  let snap: { steps: StepState[]; normalisedUrl?: string; result?: unknown } = { steps: [] };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buf += value;
+    for (let i = buf.indexOf("\n\n"); i >= 0; i = buf.indexOf("\n\n")) {
+      const block = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      const event = /^event: (.*)$/m.exec(block)?.[1];
+      const data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? "null");
+      if (event === "snapshot" || event === "result") snap = data;
+      else if (event === "step") snap = { ...snap, steps: snap.steps.map((s) => (s.id === data.id ? data : s)) };
+      else if (event === "image") snap = { ...snap, normalisedUrl: data.normalisedUrl };
+      else if (event === "error") throw new Error(data.detail);
+      yield snap;
+    }
+  }
+}
+```
+In API mode, replace the single `POST /cards/validate` call (and the timeline rebuilt from the
+result) with `for await (const snap of validateStream(base, blob, id)) setTrace(snap)`.
 
 ## How families are translated
 * Ids: `ae.fazaa` ↔ `fazaa` (short name when unique; `sa-esaad` style when two countries share a
@@ -89,6 +154,7 @@ Environment: `CARDAGENT_CONSOLE__ENABLED`, `CARDAGENT_CONSOLE__DEFAULT_COUNTRY`,
 ```bash
 curl -s http://localhost:8080/console/v1/registry | jq '.families | length'
 curl -s -F image=@data/samples/fazaa_gold.jpg -F request_id=t1 http://localhost:8080/console/v1/cards/validate | jq '.status, .card.family, .candidates[0]'
+curl -sN -F image=@data/samples/fazaa_gold.jpg http://localhost:8080/console/v1/cards/validate/stream   # live events
 curl -s -X PUT -H "X-Admin-Token: $TOKEN" -H "Content-Type: application/yaml" \
      --data-binary @mycard.yaml http://localhost:8080/console/v1/registry/families/mycard
 ```

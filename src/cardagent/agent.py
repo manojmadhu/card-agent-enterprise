@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from datetime import date
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -32,6 +33,10 @@ from .vlm.client import VlmClient
 
 log = logging.getLogger(__name__)
 
+
+
+def _no_trace(*_a, **_k):
+    return None
 
 class CardAgent:
     def __init__(self, settings: Settings):
@@ -77,7 +82,11 @@ class CardAgent:
             self.reload()
 
     # ------------------------------------------------------------------ main entry
-    def process(self, image_bytes: bytes, request_id: str | None = None, today: date | None = None) -> dict:
+    def process(self, image_bytes: bytes, request_id: str | None = None, today: date | None = None,
+                trace: Callable[..., None] | None = None) -> dict:
+        """trace (optional): called as trace("start", step) / trace("done", step, data) for each stage,
+        for live step-by-step views (the console stream). Without it, behaviour is unchanged."""
+        emit = trace or _no_trace
         self.refresh_if_changed()
         st = self.state                                        # pin state for this request
         t0 = time.perf_counter()
@@ -94,31 +103,47 @@ class CardAgent:
                                   "embedder": self.embedder.name, "ocr": self.ocr.name,
                                   **({"vlm": self.s.vlm.model} if self.vlm else {})}}
 
+        emit("start", "ingest")
         img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+        emit("done", "ingest", {"request_id": out["request_id"], "bytes": len(image_bytes),
+                                "width": None if img is None else img.shape[1],
+                                "height": None if img is None else img.shape[0]})
         if img is None:
             return self._finish(out, "REJECT", ["INVALID_IMAGE"], t0, timings)
 
+        emit("start", "quality")
         t = time.perf_counter()
         q = quality.assess(img, self.s.quality)
         out["quality"] = q
         t = lap("quality", t)
+        emit("done", "quality", {"quality": q, "ms": timings["quality"]})
         if not q["passed"]:
             return self._finish(out, "REJECT", ["RETAKE_REQUIRED", *q["issues"]], t0, timings)
 
+        emit("start", "normalise")
         card, ninfo = normalise.normalise(img)
         t = lap("normalise", t)
+        emit("done", "normalise", {"info": ninfo, "card": card, "ms": timings["normalise"]})
+        emit("start", "ocr")
         card, full, rotation = self._ocr_orientation(card, st.keywords)
         q.update(card_detected=ninfo["card_detected"], detector=ninfo["detector"], rotation=rotation)
         t = lap("ocr_full", t)
+        emit("done", "ocr", {"ocr": full, "rotation": rotation, "card": card, "ms": timings["ocr_full"]})
 
+        emit("start", "embed")
         qvec = self.embedder.embed(card)
         qkp = extract_keypoints(card, self.s.retrieval.orb_features)
         qcol = body_colour_rgb(card)
         t = lap("features", t)
+        emit("done", "embed", {"vector": qvec, "keypoints": len(qkp.pts), "body_rgb": qcol,
+                               "ms": timings["features"]})
 
+        emit("start", "search")
+        itrace = {} if trace else None
         ident = identify.identify(st.refs, st.keywords, st.families, full, qvec, qkp, qcol,
-                                  self.s.retrieval, self.s.scoring, self.s.embedder.similarity_floor)
+                                  self.s.retrieval, self.s.scoring, self.s.embedder.similarity_floor, itrace)
         t = lap("identify", t)
+        emit("done", "identify", {"ident": ident, "trace": itrace, "ref_count": st.ref_count})
         out["candidates"] = {"family": ident.family_candidates}
         if not ident.family_decided:
             sc = self.s.scoring
@@ -139,12 +164,17 @@ class CardAgent:
             q["align_shift"] = round(shift, 3)
             if shift > self.s.retrieval.max_align_shift:
                 H = None                                       # implausible correction: keep the rectified card
+        emit("start", "fields")
         aligned, did_align = extract.align(card, H)
         q["aligned_to_reference"] = did_align
         fields = extract.extract_fields(fam, aligned, full, self.ocr, self.vlm)
         t = lap("extract", t)
+        emit("done", "fields", {"family": fam, "fields": fields, "aligned": did_align,
+                                "align_shift": q.get("align_shift"), "ms": timings["extract"]})
+        emit("start", "rules")
         checks = rules.run_rules(fam, v.id if v else None, fields, today)
         lap("rules", t)
+        emit("done", "rules", {"checks": checks, "ms": timings["rules"]})
 
         status, reasons = self._decide(v, fields, checks)
         for name, f in fields.items():

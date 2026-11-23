@@ -5,6 +5,8 @@ Point the console's "API base URL" (Settings -> Engine -> card-agent API) at
 
 Routes the console calls today (exact paths and formats of its src/engine/api.ts):
   POST   /cards/validate                       multipart image + request_id -> MVP result envelope
+  POST   /cards/validate/stream                the same run as Server-Sent Events, step by step (StepState)
+  GET    /pipeline/steps                       the 11 step ids / titles / stages
   GET    /registry                             {families: [...console YAML as JSON...], version, ...}
   POST   /registry/reload                      reload the card registry
   PUT    /registry/families/{id}               create / replace a family from console YAML
@@ -23,24 +25,30 @@ files and reload. The /v1 API is unchanged.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
 import shutil
 import time
+import uuid
 from pathlib import Path
+from typing import Literal
 
 import cv2
 import numpy as np
 import yaml
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from ..agent import CardAgent
 from ..console.schema import (ConsoleFamily, console_id, resolve_enterprise_id, to_console, to_console_result,
                               to_enterprise)
+from ..console.stream import STEPS, ConsoleTrace
+from ..observability.telemetry import audit_record
 from ..registry.models import CardFamily
 from ..registry.store import IMAGE_EXT
 from ..settings import get_settings
@@ -86,6 +94,76 @@ async def validate(image: UploadFile = File(...), request_id: str | None = Form(
                    a: CardAgent = Depends(agent)):
     result = await STATE["run_validation"](image, request_id, a)
     return to_console_result(result, a.state.families)
+
+
+def _sse(event: str, data) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+
+
+@router.post("/cards/validate/stream")
+async def validate_stream(image: UploadFile = File(...), request_id: str | None = Form(None),
+                          mode: Literal["delta", "snapshot"] = "delta", a: CardAgent = Depends(agent)):
+    """Server-Sent Events: the run step by step, in the console browser engine's StepState format.
+
+    mode=delta (default): `snapshot` (all steps pending) -> `step` (one StepState, each time a step
+      starts or finishes) and `image` ({normalisedUrl}, once) -> `result` (full snapshot + result).
+    mode=snapshot: every event is a full `{steps, normalisedUrl?, result?}` snapshot, exactly what
+      the browser engine's generator yields (simplest to consume, more bytes).
+    Errors after the stream has started arrive as an `error` event. Not cached: every call runs."""
+    data = await STATE["read_upload"](image)
+    rid = request_id or f"req_{uuid.uuid4().hex[:8]}"
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    families, s = a.state.families, get_settings()
+    trace = ConsoleTrace(s, families, a.state.ref_count)
+
+    def on_stage(event, step, payload=None):                      # called from the worker thread
+        loop.call_soon_threadsafe(queue.put_nowait, ("event", event, step, payload))
+
+    async def worker():
+        try:
+            await queue.put(("result", await run_in_threadpool(a.process, data, rid, None, on_stage)))
+        except Exception as e:                                    # noqa: BLE001 - reported to the client
+            log.exception("stream validation failed")
+            await queue.put(("error", e))
+
+    task = asyncio.create_task(worker())
+
+    async def events():
+        yield _sse("snapshot", trace.snapshot())
+        sent_image = False
+        while True:
+            item = await queue.get()
+            if item[0] == "event":
+                changed = trace.on_event(*item[1:])
+                if mode == "snapshot":
+                    yield _sse("snapshot", trace.snapshot())
+                    continue
+                if trace.normalised_url and not sent_image:
+                    sent_image = True
+                    yield _sse("image", {"normalisedUrl": trace.normalised_url})
+                for st in changed:
+                    yield _sse("step", st)
+            elif item[0] == "result":
+                result = item[1]
+                console_result = to_console_result(result, families)
+                trace.finish(result, console_result)
+                log.info("decision", extra={"extra_json": {**audit_record(result, s.logging.mask_pii), "stream": True}})
+                yield _sse("result", trace.snapshot(console_result))
+                break
+            else:
+                yield _sse("error", {"detail": f"validation failed: {type(item[1]).__name__}"})
+                break
+        await task
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/pipeline/steps")
+def pipeline_steps():
+    """The 11 step ids/titles/stages the trace uses (same as the console's browser engine)."""
+    return {"steps": STEPS}
 
 
 # ================================================================================== registry

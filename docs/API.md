@@ -7,7 +7,11 @@ One API for every operation. Interactive OpenAPI docs: `http://<host>:8080/docs`
 * Errors are `{"detail": "..."}`. `422` = invalid input (nothing changed), `409` = ownership conflict,
   `503` = Qdrant unreachable (retry; header `Retry-After`).
 * Images: `image/jpeg`, `image/png` or `image/webp`, at most `api.max_image_bytes` (8 MB). Otherwise `415` / `413`.
-* Browser apps on another origin: list them in `api.cors_origins`.
+* **CORS.** A browser app on another origin (e.g. the web console on the Vite dev server) must be listed in
+  `api.cors_origins`, e.g. `CARDAGENT_API__CORS_ORIGINS='["http://localhost:5173"]'`. Allowed: methods GET, POST,
+  PUT, PATCH, DELETE; request headers `Content-Type`, `X-Admin-Token`, `Accept`, `Cache-Control`, `Last-Event-ID`;
+  the browser may read `Retry-After`. No cookies/credentials. `localhost` and `127.0.0.1` are different origins.
+  Not needed when the console is served through the same-origin reverse proxy.
 
 | Group | Method | Path | Access |
 |---|---|---|---|

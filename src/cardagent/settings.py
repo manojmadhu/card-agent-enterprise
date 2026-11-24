@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 PROJECT_ROOT = Path(os.getenv("CARDAGENT_ROOT", Path(__file__).resolve().parents[2]))
@@ -114,6 +114,23 @@ class ApiCfg(BaseModel):
     allowed_content_types: list[str] = ["image/jpeg", "image/png", "image/webp"]
     idempotency_cache_size: int = 2000
     cors_origins: list[str] = []     # browser origins allowed to call the API (e.g. the web console)
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _origins(cls, v):
+        """Accept a JSON list (the usual env form) or a comma-separated string, and normalise each
+        origin: a browser sends "http://localhost:5173", never with a path or trailing slash."""
+        if isinstance(v, str):
+            v = [x for x in (s.strip() for s in v.split(",")) if x]
+        out = []
+        for o in v or []:
+            o = str(o).strip().rstrip("/")
+            if o != "*" and not (o.startswith("http://") or o.startswith("https://")):
+                raise ValueError(f"CORS origin '{o}' must look like http://host[:port] or https://host[:port]")
+            if o != "*" and o.count("/") > 2:
+                raise ValueError(f"CORS origin '{o}' must not contain a path: use scheme://host[:port] only")
+            out.append(o)
+        return out
 
 
 class LoggingCfg(BaseModel):

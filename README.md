@@ -71,15 +71,20 @@ curl -N -F image=@photo.jpg http://127.0.0.1:8080/v1/cards/validate/stream
 Repeat the reference upload for every variant (3–20 clean images each). Then measure accuracy with an
 evaluation set (`docs/API.md` §6) before trusting automatic ACCEPTs.
 
-**Web console** (card-agent-web): API base URL `http://127.0.0.1:8080/v1`; for a console served from
-another origin, add it to `api.cors_origins`. The stream format is in `docs/API.md` §1.
+**Web console** (card-agent-web) on the Vite dev server (`http://localhost:5173`) calls the API from
+another origin, so allow it before starting the API:
+```bash
+export CARDAGENT_API__CORS_ORIGINS='["http://localhost:5173"]'      # Windows: $env:CARDAGENT_API__CORS_ORIGINS = '["http://localhost:5173"]'
+```
+Several origins: `'["http://localhost:5173","http://127.0.0.1:5173"]'`. Not needed when the console runs
+behind its nginx image (same origin). The stream format is in `docs/API.md` §1.
 
 ## Tests
 ```bash
 python -m pytest -q
 ```
 Self-contained: an in-process Qdrant, the built-in matcher and test cards drawn in code — no server,
-no model, no sample files. Needs Tesseract. 43 tests covering the rules, settings and every API group.
+no model, no sample files. Needs Tesseract. 47 tests covering the rules, settings, CORS and every API group.
 Against a Qdrant server instead: `CARDAGENT_TEST_QDRANT_URL=http://127.0.0.1:6333 python -m pytest -q`.
 
 ## Project layout

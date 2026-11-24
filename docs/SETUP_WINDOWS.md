@@ -58,6 +58,7 @@ with the other one. Switching later: `python tools/sync_registry.py --reembed`.
 ## 6. Run the API
 ```powershell
 $env:CARDAGENT_API__ADMIN_TOKEN = "choose-a-long-secret"     # needed for every admin endpoint
+$env:CARDAGENT_API__CORS_ORIGINS = '["http://localhost:5173"]'   # only for the web console on the Vite dev server
 python -m uvicorn cardagent.api.app:app --host 127.0.0.1 --port 8080
 ```
 Wait for `Uvicorn running on http://127.0.0.1:8080` (if the port is taken, use `--port 8081`).
@@ -84,7 +85,7 @@ Use `curl.exe`, not `curl` (in PowerShell `curl` is `Invoke-WebRequest`). All en
 ```powershell
 python -m pytest -q
 ```
-Self-contained (in-process Qdrant, built-in matcher, test cards drawn in code); expect `43 passed`.
+Self-contained (in-process Qdrant, built-in matcher, test cards drawn in code); expect `47 passed`.
 To run them against your Qdrant server: `$env:CARDAGENT_TEST_QDRANT_URL = "http://127.0.0.1:6333"` first
 (the tests use their own temporary collections and delete them).
 
@@ -103,4 +104,5 @@ To run them against your Qdrant server: `$env:CARDAGENT_TEST_QDRANT_URL = "http:
 | Admin call answers 403 | `CARDAGENT_API__ADMIN_TOKEN` was not set in the terminal that started the API |
 | Admin call answers 401 | The `X-Admin-Token` header does not match the token |
 | Server exits at once / `address already in use` | The port is taken: use another `--port` |
+| Browser console: "blocked by CORS policy" / "No 'Access-Control-Allow-Origin' header" | Set `$env:CARDAGENT_API__CORS_ORIGINS = '["http://localhost:5173"]'` (single quotes outside, double inside) in the terminal that starts the API, then restart it. The origin must match the address bar exactly: `localhost` ≠ `127.0.0.1`, no trailing `/` |
 | `make : The term 'make' is not recognized` | The Makefile is for Linux; use the commands in this guide |

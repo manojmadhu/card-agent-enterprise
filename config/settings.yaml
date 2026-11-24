@@ -91,7 +91,9 @@ api:
   max_image_bytes: 8000000
   allowed_content_types: [image/jpeg, image/png, image/webp]
   idempotency_cache_size: 2000     # retries keyed on request_id + image hash; 0 disables the cache
-  cors_origins: []                 # browser origins allowed to call the API, e.g. [http://localhost:5173]
+  cors_origins: []                 # browser origins allowed to call the API (scheme://host:port, no path).
+                                   # Web console on the Vite dev server: ["http://localhost:5173"], or set
+                                   # CARDAGENT_API__CORS_ORIGINS='["http://localhost:5173"]'. Empty behind a same-origin proxy.
 
 logging:
   level: INFO

@@ -89,10 +89,19 @@ app = FastAPI(title="Card Validation Agent", version=__version__, lifespan=lifes
 for r in (validate, cards, registry, runs, settings, evaluations):
     app.include_router(r.router)
 
-if get_settings().api.cors_origins:                   # opt-in: only when a browser app runs on another origin
-    app.add_middleware(CORSMiddleware, allow_origins=get_settings().api.cors_origins,
-                       allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-                       allow_headers=["Content-Type", "X-Admin-Token"])
+def cors_options(origins: list[str]) -> dict:
+    """CORS is opt-in: only needed when a browser app (e.g. the web console on the Vite dev server,
+    http://localhost:5173) calls the API from another origin. Behind a same-origin reverse proxy, leave
+    api.cors_origins empty. No cookies are used (the admin token is a header): credentials stay off."""
+    return dict(allow_origins=origins, allow_credentials=False,
+                allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+                allow_headers=["Content-Type", "X-Admin-Token", "Accept", "Cache-Control", "Last-Event-ID"],
+                expose_headers=["Retry-After", "Content-Disposition"],   # readable by the browser app
+                max_age=3600)                                             # browsers cache the preflight 1 h
+
+
+if get_settings().api.cors_origins:
+    app.add_middleware(CORSMiddleware, **cors_options(get_settings().api.cors_origins))
 
 
 @app.exception_handler(StoreUnavailable)

@@ -80,6 +80,7 @@ python -m pytest -q
 ```
 Self-contained: an in-process Qdrant, the built-in matcher and test cards drawn in code — no server,
 no model, no sample files. Needs Tesseract. 43 tests covering the rules, settings and every API group.
+Against a Qdrant server instead: `CARDAGENT_TEST_QDRANT_URL=http://127.0.0.1:6333 python -m pytest -q`.
 
 ## Project layout
 ```

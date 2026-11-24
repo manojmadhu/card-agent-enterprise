@@ -1,18 +1,24 @@
 """Hermetic test setup: in-process Qdrant (location=":memory:"), the classic embedder (no model
 download), and every data directory in a temporary folder. Each test module gets a fresh platform
-(new in-memory Qdrant) through the `client` fixture. Needs Tesseract with the eng traineddata."""
+through the `client` fixture. Needs Tesseract with the eng traineddata.
+
+To run the same tests against a Qdrant server instead: CARDAGENT_TEST_QDRANT_URL=http://127.0.0.1:6333
+(each module uses its own collection prefix test_<random>_*, deleted afterwards)."""
 from __future__ import annotations
 
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
 
 _TMP = Path(tempfile.mkdtemp(prefix="cardagent-tests-"))
+SERVER = os.getenv("CARDAGENT_TEST_QDRANT_URL")
 os.environ.update({
-    "CARDAGENT_QDRANT__LOCATION": ":memory:",
+    "CARDAGENT_QDRANT__LOCATION": "" if SERVER else ":memory:",
+    "CARDAGENT_QDRANT__URL": SERVER or "http://127.0.0.1:6333",
     "CARDAGENT_QDRANT__SYNC_ON_STARTUP": "false",
     "CARDAGENT_QDRANT__REFERENCE_STORE_DIR": str(_TMP / "reference_store"),
     "CARDAGENT_REGISTRY_DIR": str(_TMP / "registry"),
@@ -30,6 +36,7 @@ os.environ.update({
 from fastapi.testclient import TestClient  # noqa: E402
 
 from cardagent.api.app import app  # noqa: E402
+from cardagent.settings import get_settings  # noqa: E402
 
 from . import cards  # noqa: E402
 
@@ -43,11 +50,21 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(scope="module")
 def client():
-    """A fresh, empty platform (new in-memory Qdrant) per test module."""
+    """A fresh, empty platform (new in-memory Qdrant, or new collections on a server) per test module."""
     shutil.rmtree(REGISTRY, ignore_errors=True)
     (REGISTRY / "cards").mkdir(parents=True)
+    prefix = f"test_{uuid.uuid4().hex[:8]}"
+    if SERVER:
+        os.environ["CARDAGENT_QDRANT__COLLECTION_PREFIX"] = prefix
+        get_settings.cache_clear()
     with TestClient(app) as c:
         yield c
+    if SERVER:
+        from qdrant_client import QdrantClient
+        q = QdrantClient(url=SERVER)
+        for col in q.get_collections().collections:
+            if col.name.startswith(prefix + "_"):
+                q.delete_collection(col.name)
 
 
 def add_card(c: TestClient, family_id: str, refs_per_variant: int = 3):

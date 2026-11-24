@@ -85,6 +85,8 @@ Use `curl.exe`, not `curl` (in PowerShell `curl` is `Invoke-WebRequest`). All en
 python -m pytest -q
 ```
 Self-contained (in-process Qdrant, built-in matcher, test cards drawn in code); expect `43 passed`.
+To run them against your Qdrant server: `$env:CARDAGENT_TEST_QDRANT_URL = "http://127.0.0.1:6333"` first
+(the tests use their own temporary collections and delete them).
 
 ## Troubleshooting
 | Message | Fix |

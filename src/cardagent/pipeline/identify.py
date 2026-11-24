@@ -7,7 +7,7 @@ Stage 2 (precision):       similarity to every reference of the candidate famili
                            fused with text, embedding and colour scores -> family, then variant.
 Decisions need score >= min AND margin over runner-up >= margin.
 
-Works against any store backend (FAISS file index or Qdrant) through RefView; the cost per request
+Works against the Qdrant card store through RefView; the cost per request
 depends on the shortlisted families, never on the total number of cards.
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ def identify(refs_view: RefView, keywords: KeywordIndex, families: dict[str, Car
              qvec: np.ndarray, qkp: Keypoints, qcolour, rcfg: RetrievalCfg, scfg: ScoringCfg,
              sim_floor: float, trace: dict | None = None) -> Identification:
     """trace (optional): filled with the intermediate evidence (shortlist, keyword hits, verified
-    references, per-sub-stage timings) for step-by-step views such as the console's stream."""
+    references, per-sub-stage timings) for step-by-step views such as the validation stream."""
     t0 = time.perf_counter()
     tokens, text = ocr["tokens"], ocr["text"]
     nn = refs_view.search(qvec, rcfg.shortlist_refs)                # stage-1 vector shortlist

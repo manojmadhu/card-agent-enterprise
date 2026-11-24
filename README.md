@@ -2,136 +2,107 @@
 
 Identifies GCC discount/membership cards from a photo (family → variant), extracts the printed
 fields, validates them, and returns a strict JSON decision: `ACCEPT` / `REVIEW` / `REJECT`.
-**Fully offline — no public AI APIs.** All models run inside your network.
+**Fully offline — no public AI APIs.** All models run inside your network; **Qdrant** is the only store.
 
+- API reference (every endpoint): [docs/API.md](docs/API.md) · OpenAPI at `/docs` on a running server
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Deployment, GPU sizing (NVIDIA T4), onboarding cards, runbook: [docs/OPERATIONS.md](docs/OPERATIONS.md)
+- Deployment, GPU sizing (NVIDIA T4), card onboarding, runbook: [docs/OPERATIONS.md](docs/OPERATIONS.md)
+- Windows step by step: [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md)
+
+## What the platform does
+| Feature | Endpoints |
+|---|---|
+| Validate a card photo, plain or as a live step-by-step stream (SSE) | `POST /v1/cards/validate`, `POST /v1/cards/validate/stream` |
+| Manage card programmes, variants, fields, rules and reference images | `/v1/cards…` |
+| Import Git-managed cards from `registry/` (optional) | `POST /v1/registry/sync` |
+| Run history, human review queue, enroll reviewed photos as references | `/v1/runs…`, `/v1/review` |
+| Operating statistics (automation rate, review rate, latency, reasons) | `GET /v1/stats` |
+| Change thresholds at runtime, no restart | `GET/PATCH/DELETE /v1/settings` |
+| Accuracy evaluation on labelled sets, incl. what-if settings | `/v1/evaluation-sets…`, `/v1/evaluations…` |
+| Health and Prometheus metrics | `/health/live`, `/health/ready`, `/metrics` |
+
+The platform **starts empty**: no demo cards. Add your programmes through the API (or `registry/`),
+upload a few reference images per variant, and it is ready. `examples/cards/` has templates.
 
 ## Run on a local PC
-**Windows: follow [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md)** — full step-by-step guide with a
-troubleshooting table. The short version is below.
+**You need:** Python 3.10–3.12 (64-bit), Git, Tesseract OCR with English + Arabic data, Docker (for Qdrant).
+Windows: follow [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md).
 
-**You need:** Python 3.10–3.12 (64-bit), Git, Tesseract OCR with English + Arabic data, and — for the
-full setup only — Docker (for Qdrant). There are two ways to run it:
-
-| | Quick check | Full setup (production-like) |
-|---|---|---|
-| Matcher | built-in `classic` (no model file) | DINOv2 (`models/dinov2/dinov2_vits14.onnx`, ~90 MB) |
-| Card store | `faiss` (files, no server) | Qdrant server (Docker) |
-| Use for | first run, CI, a PC without Docker | real accuracy, card management API, console writes |
-
-### Windows (PowerShell)
-```powershell
-git clone -b feature/console-api https://github.com/manojmadhu/card-agent-enterprise.git
-cd card-agent-enterprise
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1                      # every new terminal: activate first
-pip install -e ".[dev]"
-python tools/make_samples.py                      # synthetic test photos -> data/samples (keeps registry/refs)
-
-# quick check (no Docker, no model)
-$env:CARDAGENT_VECTOR_STORE__BACKEND = "faiss"
-$env:CARDAGENT_EMBEDDER__KIND = "classic"
-python tools/build_index.py --force
-python tools/evaluate.py --today 2026-11-24
-
-# run the API, then in a second terminal: curl.exe http://127.0.0.1:8081/health/ready
-python -m uvicorn cardagent.api.app:app --host 127.0.0.1 --port 8081
-```
-
-### Linux / macOS
 ```bash
-git clone -b feature/console-api https://github.com/manojmadhu/card-agent-enterprise.git
+git clone -b feature/qdrant-platform https://github.com/manojmadhu/card-agent-enterprise.git
 cd card-agent-enterprise
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"                           # + OS packages: tesseract-ocr tesseract-ocr-ara
-python tools/make_samples.py
-export CARDAGENT_VECTOR_STORE__BACKEND=faiss CARDAGENT_EMBEDDER__KIND=classic   # quick check
-python tools/build_index.py --force
-python tools/evaluate.py --today 2026-11-24
-python -m uvicorn cardagent.api.app:app --host 127.0.0.1 --port 8081
+python3 -m venv .venv && . .venv/bin/activate        # Windows: py -3.12 -m venv .venv ; .\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"                              # + OS packages: tesseract-ocr tesseract-ocr-ara
+
+# Qdrant (data kept in the docker volume cardagent_qdrant)
+docker run -d --name cardagent-qdrant --restart unless-stopped \
+  -p 127.0.0.1:6333:6333 -v cardagent_qdrant:/qdrant/storage qdrant/qdrant:v1.18.1
 ```
 
-### Full setup (both systems)
-1. **DINOv2 model** — copy `models/dinov2/dinov2_vits14.onnx` from another install, or create it once:
-   `pip install torch --index-url https://download.pytorch.org/whl/cpu` ·
-   `pip install transformers onnx onnxscript huggingface_hub` ·
-   `hf download facebook/dinov2-small --local-dir models/dinov2-small` ·
-   `python tools/export_dinov2_onnx.py --model-dir models/dinov2-small --out models/dinov2/dinov2_vits14.onnx`
-2. **Qdrant** — `docker run -d --name cardagent-qdrant --restart unless-stopped -p 127.0.0.1:6333:6333 -v cardagent_qdrant:/qdrant/storage qdrant/qdrant:v1.18.1`
-3. **Default settings** (clear the quick-check variables) — `python tools/build_index.py` loads the
-   registry into Qdrant (a new Qdrant is empty), then `python tools/evaluate.py` and start the API.
-
-### Try it
+**Matcher model.** `config/settings.yaml` uses DINOv2 (`models/dinov2/dinov2_vits14.onnx`, ~90 MB,
+not in Git). Copy it from another install, or create it once:
 ```bash
-curl.exe -F image=@data/samples/fazaa_gold.jpg -F request_id=t1 http://127.0.0.1:8081/v1/cards/validate
-curl.exe -N -F image=@data/samples/fazaa_gold.jpg http://127.0.0.1:8081/console/v1/cards/validate/stream
-python -m pytest -q        # no Qdrant server needed (in-process Qdrant)
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install transformers onnx onnxscript huggingface_hub
+hf download facebook/dinov2-small --local-dir models/dinov2-small
+python tools/export_dinov2_onnx.py --model-dir models/dinov2-small --out models/dinov2/dinov2_vits14.onnx
 ```
-(`curl.exe` on Windows; plain `curl` on Linux/macOS.) Set `CARDAGENT_API__ADMIN_TOKEN` before starting
-the API to use the admin endpoints. Expected on a quick check: `ACCEPT precision 1.0`; a few demo cards
-go to REVIEW and the gate may show FAIL, because the built-in matcher is simpler than DINOv2.
+Without the model, use the built-in matcher: `export CARDAGENT_EMBEDDER__KIND=classic CARDAGENT_EMBEDDER__SIMILARITY_FLOOR=0.55`
+(Windows: `$env:CARDAGENT_EMBEDDER__KIND = "classic"`). Use one matcher per Qdrant: switching later
+needs `python tools/sync_registry.py --reembed`.
 
-## API
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/v1/cards/validate` | multipart `image` (jpeg/png/webp ≤ 8 MB) + optional `request_id` (idempotent: a retry with the same id **and** same image returns the cached result; a different image is always processed) |
-| GET | `/v1/registry` | loaded families/variants/reference counts + registry version |
-| GET | `/health/live`, `/health/ready` | liveness / readiness (vector store, registry, embedder, OCR, VLM status) |
-| GET | `/metrics` | Prometheus |
+**Start the API:**
+```bash
+export CARDAGENT_API__ADMIN_TOKEN=choose-a-long-secret     # Windows: $env:CARDAGENT_API__ADMIN_TOKEN = "..."
+python -m uvicorn cardagent.api.app:app --host 127.0.0.1 --port 8080
+curl http://127.0.0.1:8080/health/ready                    # Windows: curl.exe
+```
 
-**Card management** (header `X-Admin-Token`; Qdrant backend). Each call touches only that card — no re-index:
+**Add a card and validate** (second terminal):
+```bash
+H="X-Admin-Token: choose-a-long-secret"
+curl -X PUT -H "$H" -H "Content-Type: application/yaml" --data-binary @examples/cards/ae/fazaa.yaml \
+     http://127.0.0.1:8080/v1/cards/ae.fazaa                       # edit the template for the real design first
+curl -X POST -H "$H" -F images=@gold_ref1.jpg -F images=@gold_ref2.jpg \
+     http://127.0.0.1:8080/v1/cards/ae.fazaa/variants/gold/references
+curl -F image=@photo.jpg -F request_id=t1 http://127.0.0.1:8080/v1/cards/validate
+curl -N -F image=@photo.jpg http://127.0.0.1:8080/v1/cards/validate/stream
+```
+Repeat the reference upload for every variant (3–20 clean images each). Then measure accuracy with an
+evaluation set (`docs/API.md` §6) before trusting automatic ACCEPTs.
 
-| Method | Path | Notes |
-|---|---|---|
-| GET | `/v1/admin/cards` | all card families with owner (`registry`/`api`) and reference counts |
-| GET | `/v1/admin/cards/{family_id}` | definition + reference images (ids) per variant |
-| PUT | `/v1/admin/cards/{family_id}` | create (201) / replace (200) a definition; JSON or YAML body, same schema as `registry/cards/*.yaml` |
-| DELETE | `/v1/admin/cards/{family_id}` | remove the card and all its reference vectors |
-| POST | `/v1/admin/cards/{family_id}/variants/{variant_id}/references` | multipart `images` (1–20); embedded and indexed immediately; re-upload = no-op |
-| DELETE | `/v1/admin/cards/{family_id}/references/{ref_id}` | remove one reference image |
-| POST | `/v1/admin/cards/sync` | incremental sync from `registry/` (same as `tools/build_index.py`) |
-| POST | `/v1/admin/registry/reload` | re-read definitions now (replicas also poll every `refresh_seconds`) |
+**Web console** (card-agent-web): API base URL `http://127.0.0.1:8080/v1`; for a console served from
+another origin, add it to `api.cors_origins`. The stream format is in `docs/API.md` §1.
 
-Registry-owned cards answer `409` to API changes unless `?force=true` — see [OPERATIONS §4](docs/OPERATIONS.md).
-
-**Card Agent Console** (card-agent-web): set the console's API base URL to `http://<host>:8080/console/v1`.
-That API speaks the console's MVP formats (family YAML, result envelope) on top of the same pipeline and card
-store, including a live step-by-step stream (`POST /console/v1/cards/validate/stream`, Server-Sent Events in the
-console's StepState format); `/v1` is unchanged. Routes, translation rules and security: [docs/CONSOLE_API.md](docs/CONSOLE_API.md).
-
-Output contract: `src/cardagent/schemas.py` (`python -m cardagent.schemas` prints the JSON Schema).
+## Tests
+```bash
+python -m pytest -q
+```
+Self-contained: an in-process Qdrant, the built-in matcher and test cards drawn in code — no server,
+no model, no sample files. Needs Tesseract. 43 tests covering the rules, settings and every API group.
 
 ## Project layout
 ```
-config/settings.yaml          all thresholds/paths; override with CARDAGENT_<SECTION>__<KEY>
-registry/cards/<cc>/*.yaml    one file per card programme (validated on load)
-registry/refs/<family>/<variant>/*.png   reference images
+config/settings.yaml          all settings; override with CARDAGENT_<SECTION>__<KEY>
+examples/cards/               card definition templates (not loaded)
+registry/cards, registry/refs optional Git-managed cards -> POST /v1/registry/sync or tools/sync_registry.py
 src/cardagent/
-  agent.py                    orchestrator + hot-reloadable engine state
+  agent.py                    orchestrator; hot-reloads cards and settings from Qdrant
+  api/app.py, api/routes/     FastAPI app: validate, cards, registry, runs, settings, evaluations
+  store/                      Qdrant: card store, runs, evaluations, runtime settings, registry sync
+  evaluation.py               evaluation metrics and gate (API and CLI)
   vision/                     quality gate, card detection/warp, colour, ORB + RANSAC
   embed/                      ClassicEmbedder (no model) | Dinov2OnnxEmbedder (production)
-  store/                      card store: Qdrant (production) | FAISS (dev), keyword index, incremental sync
-  index/                      FAISS file index (faiss backend)
   ocr/                        Tesseract | PaddleOCR (local models only)
-  pipeline/                   identify (2-stage), extract (homography-aligned), rules
+  pipeline/                   identify (2-stage), extract (homography-aligned), rules, step trace (stream)
   vlm/                        self-hosted VLM fallback (Ollama / OpenAI-compatible) + circuit breaker
-  api/                        FastAPI app + card management router (admin_cards.py)
   observability/              metrics, JSON logs, PII masking
-tools/                        make_samples, build_index, evaluate (CI gate), export_dinov2_onnx
+tools/                        sync_registry, evaluate (CI gate), export_dinov2_onnx
 deploy/                       Dockerfile (CPU), Dockerfile.gpu (T4), docker-compose.yml (Qdrant + sync + agent + VLM)
+tests/                        self-contained test suite
 ```
 
-## Results on the synthetic data (this repo, CPU, classic embedder)
-| Set | Photos | Correct decision | Wrong ACCEPTs | Field accuracy | p50 / p95 |
-|---|---|---|---|---|---|
-| Main (Fazaa, Esaad, expired, blurry, glare, unknown, look-alikes) | 25 | 25 / 25 | 0 | 100 % | 1.5 s / 1.9 s |
-| Scale (every variant of 32 programmes, 279 references) | 93 | 90 / 93 (3 → REVIEW) | 0 | 100 % | 1.4 s / 1.9 s |
-
-These are **synthetic** cards. Real accuracy must be measured on real, consented photos (see OPERATIONS §5).
-
 ## Not verified in this build environment
-- The DINOv2 ONNX path and the GPU image (no GPU or model weights were available here) — the code is
-  in place; validate with `tools/export_dinov2_onnx.py` + `tools/evaluate.py` on your T4 host.
+- The DINOv2 ONNX path and the GPU image (no GPU or model weights here); the tests use the built-in matcher.
 - PaddleOCR engine and the VLM fallback (code paths present; need local models/endpoint).
-- Card layouts/colours/number formats in `registry/cards/ae/*.yaml` are placeholders.
+- Layouts, colours and number formats in `examples/cards/` are placeholders.

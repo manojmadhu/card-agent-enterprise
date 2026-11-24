@@ -13,12 +13,12 @@ COPY src ./src
 COPY config ./config
 COPY registry ./registry
 COPY tools ./tools
-RUN useradd -r -u 10001 agent && mkdir -p /app/data/index /app/data/reference_store /app/models \
+RUN useradd -r -u 10001 agent && mkdir -p /app/data/reference_store /app/data/run_store /app/data/evaluations /app/models \
     && chown -R agent /app/data
 USER agent
 # Fail the image build on an invalid registry. The vectors live in Qdrant and are synced at deploy
-# time (registry-sync service in docker-compose.yml / a Kubernetes Job), not baked into the image.
-RUN python tools/build_index.py --validate-only
+# time (registry-sync service in docker-compose.yml / a Kubernetes Job) or managed through the API.
+RUN python tools/sync_registry.py --validate-only
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD curl -fs http://localhost:8080/health/ready || exit 1
 CMD ["uvicorn", "cardagent.api.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

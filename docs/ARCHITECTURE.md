@@ -21,8 +21,10 @@ image ─► [1] quality gate ─► [2] detect + warp card ─► [3] full-card
                variant score (inside family) = colour, variant keyword, geometry, embed, number prefix
  [5] ALIGN to best reference with its homography  →  YAML regions land on exact pixels
  [6] EXTRACT fields: region OCR → regex  |  full-text regex  |  self-hosted VLM (re-validated)
- [7] RULES (YAML): regex, not_expired, emirates_id_format, luhn, length, prefix_matches_variant, lookup
- [8] DECIDE: ACCEPT / REVIEW / REJECT + reason codes → JSON (schema 2.0) + audit log + metrics
+ [7] RULES (card definition): regex, not_expired, date_order, emirates_id_format, luhn, length,
+     prefix_matches_variant, lookup
+ [8] DECIDE: ACCEPT / REVIEW / REJECT + reason codes → JSON (schema 2.0) + run record (Qdrant) + audit log + metrics
+     REVIEW → human review queue → accept/reject (+ enroll photo as reference) → evaluation sets
 ```
 
 ### Design choices that matter
@@ -38,28 +40,37 @@ image ─► [1] quality gate ─► [2] detect + warp card ─► [3] full-card
 | VLM only as fallback, output re-validated | VLMs can hallucinate plausible numbers; regex + rules have the final word; VLM-sourced fields force REVIEW. |
 | `lookup` rule hook | Reading a card ≠ proving it is active. Register an issuer verifier when available. |
 
-## 3. Card store, registry and versioning
-Two backends behind one interface (`src/cardagent/store/`), selected by `vector_store.backend`:
+## 3. Qdrant: the single store
+Everything the platform keeps lives in Qdrant (`src/cardagent/store/`), so any number of API replicas
+can share one Qdrant and stay consistent. Collections (prefix `qdrant.collection_prefix`, default `cardagent`):
 
-| | **qdrant** (production) | **faiss** (dev / single process) |
-|---|---|---|
-| Vectors | `cardagent_refs` collection: one point per reference image (cosine), payload `family`, `variant`, `country`, `sha256`, `source`, ORB keypoints (on disk) | `data/index/<version>__<embedder>__<format>/` files |
-| Card definitions | `cardagent_families` collection (validated JSON) + a `meta` point (revision, embedder, dim) | `registry/cards/**/*.yaml` |
-| Add / remove a card | only that card's points (seconds); admin API or incremental sync | full rebuild of the file index |
-| Replicas | all share one Qdrant; each polls the revision every `refresh_seconds` | each process builds its own copy |
-| Version on results | Qdrant revision (changes on every write) | SHA-256 over every YAML and reference image |
+| Collection | Points |
+|---|---|
+| `_refs` | one per reference image: cosine vector + payload `family`, `variant`, `country`, `sha256`, `source`, ORB keypoints |
+| `_families` | card definitions (validated JSON), a `meta` point (revision, embedder, vector size) and the runtime settings overrides |
+| `_runs` | every validation (payload only): decision summary, full response, review; photo on disk (`runs.store_dir`) |
+| `_evaluations` | evaluation sets and evaluations; zips and reports on disk (`evaluation.store_dir`) |
 
 * **Point ids are content addressed**: `uuid5(family/variant/sha256(image))`. Re-adding an image is a no-op; an image never gets two vectors.
-* **Ownership**: every family has `source = registry | api`. `tools/build_index.py` (or `POST /v1/admin/cards/sync`) syncs `registry/` incrementally and never modifies or prunes API-owned cards. The API refuses (409) to change registry-owned cards unless `?force=true`.
-* **ROI changes** re-extract keypoints for that family only (personal-data regions are masked out of reference keypoints); vectors are untouched. **Embedder changes** require `build_index.py --reembed` (the service refuses to start on a mismatch).
-* `registry/cards/<cc>/<programme>.yaml` — validated by `registry/models.py` (pydantic): id format, ROI bounds, regex compiles, rules reference real fields, unique variants. The API validates definitions with the same model.
-* **Hot reload**: a new snapshot is built off to the side → single reference swap; in-flight requests finish on the state they started with; failures keep the old state (`422`, metric `cardagent_registry_reloads_total{result="failed"}`).
+* **Changes touch only the affected card**: add/replace/delete a family or a reference image in seconds, no re-index. Each write bumps the store revision; every replica checks it every `qdrant.refresh_seconds` and reloads (cards + settings) when it changed.
+* **Ownership**: every family has `source = api | registry`. Cards are normally managed through the API. Optionally, Git-managed files in `registry/` are imported incrementally (`POST /v1/registry/sync`, `tools/sync_registry.py`); a sync never modifies or prunes API-owned cards, and the API refuses (409) to change registry-owned cards unless `?force=true`.
+* **ROI changes** re-extract keypoints for that family only (personal-data regions are masked out of reference keypoints); vectors are untouched. **Embedder changes** require a re-embed (`tools/sync_registry.py --reembed`): the service refuses to start on a mismatch. Uploaded reference images are kept in `qdrant.reference_store_dir` for that purpose.
+* Definitions are validated by `registry/models.py` (pydantic): id format, ROI bounds, regex compiles, rules reference real fields, unique variants.
+* **Hot reload**: a new snapshot is built off to the side → single reference swap; in-flight requests finish on the state they started with; failures keep the old state (metric `cardagent_registry_reloads_total{result="failed"}`).
+* **Runtime settings**: decision thresholds can be overridden through `PATCH /v1/settings` (stored in Qdrant, applied by every replica). Effective settings = file + environment + overrides. `process(settings=...)` runs a single request with other settings — used by what-if evaluations without touching live traffic.
+
+## 3a. Human review loop
+`REVIEW` decisions enter a queue (`GET /v1/review`). A reviewer accepts (optionally correcting the card
+and fields) or rejects. Accepting with `enroll=true` adds the photo as a new reference image, so the
+design is recognised next time. Reviewed runs can be turned into an evaluation set
+(`POST /v1/evaluation-sets/from-runs`), closing the loop: production feedback → ground truth → gate
+for the next threshold or card change.
 
 ## 4. Models (all self-hosted)
 | Role | Default (dev/CI) | Production | License |
 |---|---|---|---|
 | Global embedding | Classic (Lab layout + HOG), no weights | DINOv2 ViT-S/14 via ONNX Runtime (CUDA) | Apache-2.0 |
-| Vector store | FAISS IndexFlatIP (exact, file) | Qdrant 1.18 (self-hosted; HNSW, filtered search, snapshots, replication) | MIT / Apache-2.0 |
+| Vector store | Qdrant 1.18 (in-process `:memory:` for tests) | Qdrant 1.18 server (self-hosted; HNSW, filtered search, snapshots, replication) | Apache-2.0 |
 | Local features | OpenCV ORB + RANSAC | same | Apache-2.0 |
 | OCR | Tesseract 5 (eng+ara) | PaddleOCR (GPU) or Tesseract | Apache-2.0 |
 | VLM fallback | off | Qwen2.5-VL-7B (4-bit) via Ollama/llama.cpp | Apache-2.0 (7B; verify model card) |
@@ -67,7 +78,7 @@ Two backends behind one interface (`src/cardagent/store/`), selected by `vector_
 ## 5. Output contract (excerpt)
 ```json
 {
-  "schema_version": "2.0", "request_id": "abc", "status": "ACCEPT", "reasons": [],
+  "schema_version": "2.0", "request_id": "abc", "run_id": "5c0f…", "status": "ACCEPT", "reasons": [],
   "card": {"family": "ae.fazaa", "family_name": "Fazaa", "country": "AE", "issuer": "Fazaa",
            "family_confidence": 0.93, "variant": "gold", "variant_name": "Fazaa Gold", "variant_confidence": 0.88},
   "fields": {"card_number": {"value": "2210457783", "confidence": 0.95, "source": "ocr_roi", "valid_format": true},

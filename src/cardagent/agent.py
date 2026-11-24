@@ -1,10 +1,14 @@
 """CardAgent: orchestrates all stages and owns hot-reloadable engine state.
 
 Engine state is a StoreSnapshot (card definitions + keyword index + a read view of the reference
-vectors) taken from the card store. A reload builds a new snapshot off to the side and swaps a
-single reference: requests in flight keep the state they started with, and a failed reload leaves
-the current state untouched. With the Qdrant backend, every replica checks the store revision
-every `refresh_seconds` and reloads only when cards were added/changed/removed elsewhere.
+vectors) taken from Qdrant. A reload builds a new snapshot off to the side and swaps a single
+reference: requests in flight keep the state they started with, and a failed reload leaves the
+current state untouched. Every replica checks the store revision every qdrant.refresh_seconds and
+reloads when cards or runtime settings were changed elsewhere.
+
+Settings: `base_settings` come from config/settings.yaml + environment; `s` (effective) adds the
+threshold overrides stored in Qdrant (PATCH /v1/settings). process(settings=...) runs one request
+with other settings (what-if evaluations) without touching the live ones.
 """
 from __future__ import annotations
 
@@ -26,7 +30,10 @@ from .pipeline import extract, identify, rules
 from .schemas import ValidationResult
 from .settings import PROJECT_ROOT, Settings
 from .store.base import StoreSnapshot
-from .store.factory import build_store
+from .store.evaluations import EvaluationStore
+from .store.qdrant_store import QdrantCardStore
+from .store.runs import RunStore
+from .store.runtime_settings import RuntimeSettingsStore, apply_overrides
 from .vision import normalise, quality
 from .vision.features import body_colour_rgb, extract_keypoints
 from .vlm.client import VlmClient
@@ -34,24 +41,38 @@ from .vlm.client import VlmClient
 log = logging.getLogger(__name__)
 
 
-
 def _no_trace(*_a, **_k):
     return None
 
+
 class CardAgent:
     def __init__(self, settings: Settings):
+        self.base_settings = settings
         self.s = settings
         self.embedder: Embedder = build_embedder(settings.embedder, PROJECT_ROOT)
         self.ocr: OcrEngine = build_ocr(settings.ocr, PROJECT_ROOT)
         self.vlm = VlmClient(settings.vlm) if settings.vlm.enabled else None
-        self.store = build_store(settings, self.embedder)
-        if self.store.backend == "qdrant" and settings.vector_store.qdrant.sync_on_startup:
+        self.store = QdrantCardStore(settings.qdrant, self.embedder, settings.retrieval.orb_features, PROJECT_ROOT)
+        self.runtime_settings = RuntimeSettingsStore(self.store)
+        self.runs = RunStore(self.store, settings.runs, PROJECT_ROOT)
+        self.evaluations = EvaluationStore(self.store, settings.evaluation.store_dir, PROJECT_ROOT)
+        if settings.qdrant.sync_on_startup:
             from .store.sync import sync_registry
-            log.info("registry sync on startup: %s", sync_registry(self.store, self.s.path(self.s.registry_dir)))
+            log.info("registry sync on startup: %s", sync_registry(self.store, settings.path(settings.registry_dir)))
         self._reload_lock = threading.Lock()
         self._last_check = time.monotonic()
+        self._apply_runtime_settings()
         self.state: StoreSnapshot = self.store.snapshot()
         tm.REGISTRY_INFO.set(self.state.ref_count)
+
+    def _apply_runtime_settings(self) -> None:
+        overrides = self.runtime_settings.get()
+        try:
+            self.s = apply_overrides(self.base_settings, overrides)
+        except ValueError as e:                                  # stored overrides no longer valid
+            log.error("ignoring invalid runtime settings in Qdrant: %s", e)
+            self.s = self.base_settings
+        self.overrides = overrides
 
     # ------------------------------------------------------------------ registry
     def reload(self, rebuild: bool = False) -> dict:
@@ -63,6 +84,7 @@ class CardAgent:
                 log.exception("registry reload failed; keeping version %s", self.state.version)
                 raise
             old = self.state.version
+            self._apply_runtime_settings()
             self.state = new                                   # atomic reference swap
             self._last_check = time.monotonic()
             tm.RELOADS.labels("ok").inc()
@@ -72,10 +94,8 @@ class CardAgent:
             return new.summary()
 
     def refresh_if_changed(self, force: bool = False) -> None:
-        """Qdrant backend: pick up card changes made by any replica (cheap revision check)."""
-        if self.store.backend != "qdrant":
-            return
-        if not force and time.monotonic() - self._last_check < self.s.vector_store.qdrant.refresh_seconds:
+        """Pick up card or settings changes made by any replica (cheap revision check)."""
+        if not force and time.monotonic() - self._last_check < self.s.qdrant.refresh_seconds:
             return
         self._last_check = time.monotonic()
         if self.store.current_version() != self.state.version:
@@ -83,11 +103,13 @@ class CardAgent:
 
     # ------------------------------------------------------------------ main entry
     def process(self, image_bytes: bytes, request_id: str | None = None, today: date | None = None,
-                trace: Callable[..., None] | None = None) -> dict:
+                trace: Callable[..., None] | None = None, settings: Settings | None = None) -> dict:
         """trace (optional): called as trace("start", step) / trace("done", step, data) for each stage,
-        for live step-by-step views (the console stream). Without it, behaviour is unchanged."""
+        for the live step-by-step stream. settings (optional): use these instead of the live settings
+        for this call only (what-if evaluations). Without them, behaviour is unchanged."""
         emit = trace or _no_trace
         self.refresh_if_changed()
+        s = settings or self.s
         st = self.state                                        # pin state for this request
         t0 = time.perf_counter()
         timings: dict[str, int] = {}
@@ -101,7 +123,7 @@ class CardAgent:
         out = {"request_id": request_id or str(uuid.uuid4()), "status": "REJECT", "reasons": [],
                "model_versions": {"pipeline": __version__, "registry": st.version,
                                   "embedder": self.embedder.name, "ocr": self.ocr.name,
-                                  **({"vlm": self.s.vlm.model} if self.vlm else {})}}
+                                  **({"vlm": s.vlm.model} if self.vlm else {})}}
 
         emit("start", "ingest")
         img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -113,7 +135,7 @@ class CardAgent:
 
         emit("start", "quality")
         t = time.perf_counter()
-        q = quality.assess(img, self.s.quality)
+        q = quality.assess(img, s.quality)
         out["quality"] = q
         t = lap("quality", t)
         emit("done", "quality", {"quality": q, "ms": timings["quality"]})
@@ -132,7 +154,7 @@ class CardAgent:
 
         emit("start", "embed")
         qvec = self.embedder.embed(card)
-        qkp = extract_keypoints(card, self.s.retrieval.orb_features)
+        qkp = extract_keypoints(card, s.retrieval.orb_features)
         qcol = body_colour_rgb(card)
         t = lap("features", t)
         emit("done", "embed", {"vector": qvec, "keypoints": len(qkp.pts), "body_rgb": qcol,
@@ -141,12 +163,12 @@ class CardAgent:
         emit("start", "search")
         itrace = {} if trace else None
         ident = identify.identify(st.refs, st.keywords, st.families, full, qvec, qkp, qcol,
-                                  self.s.retrieval, self.s.scoring, self.s.embedder.similarity_floor, itrace)
+                                  s.retrieval, s.scoring, s.embedder.similarity_floor, itrace)
         t = lap("identify", t)
         emit("done", "identify", {"ident": ident, "trace": itrace, "ref_count": st.ref_count})
         out["candidates"] = {"family": ident.family_candidates}
         if not ident.family_decided:
-            sc = self.s.scoring
+            sc = s.scoring
             reason = "UNKNOWN_CARD_TYPE" if ident.family_score < sc.family_min else "AMBIGUOUS_CARD_TYPE"
             status = "REJECT" if ident.family_score < sc.reject_below else "REVIEW"
             return self._finish(out, status, [reason], t0, timings)
@@ -158,11 +180,11 @@ class CardAgent:
                        "family_confidence": ident.family_score, "variant": v.id if v else None,
                        "variant_name": v.name if v else None, "variant_confidence": ident.variant_score}
 
-        H = ident.best_match.H if (ident.best_match and ident.best_match.inliers >= self.s.retrieval.min_inliers) else None
+        H = ident.best_match.H if (ident.best_match and ident.best_match.inliers >= s.retrieval.min_inliers) else None
         if H is not None and ninfo["card_detected"]:
             shift = extract.corner_shift(H)
             q["align_shift"] = round(shift, 3)
-            if shift > self.s.retrieval.max_align_shift:
+            if shift > s.retrieval.max_align_shift:
                 H = None                                       # implausible correction: keep the rectified card
         emit("start", "fields")
         aligned, did_align = extract.align(card, H)
@@ -176,7 +198,7 @@ class CardAgent:
         lap("rules", t)
         emit("done", "rules", {"checks": checks, "ms": timings["rules"]})
 
-        status, reasons = self._decide(v, fields, checks)
+        status, reasons = self._decide(v, fields, checks, s)
         for name, f in fields.items():
             if f["source"] == "vlm":
                 tm.VLM_CALLS.inc()
@@ -206,14 +228,14 @@ class CardAgent:
                 break
         return best[1], best[2], best[3]
 
-    def _decide(self, v, fields, checks) -> tuple[str, list[str]]:
+    def _decide(self, v, fields, checks, s: Settings) -> tuple[str, list[str]]:
         reasons = []
         if v is None:
             reasons.append("AMBIGUOUS_VARIANT")
         for name, f in fields.items():
             if f["required"] and not f["valid_format"]:
                 reasons.append(f"FIELD_UNREADABLE:{name}")
-            elif f["valid_format"] and (f["confidence"] < self.s.scoring.field_min_confidence or f["source"] == "vlm"):
+            elif f["valid_format"] and (f["confidence"] < s.scoring.field_min_confidence or f["source"] == "vlm"):
                 reasons.append(f"LOW_CONFIDENCE:{name}")
         expired = any(c["rule"] == "not_expired" and c["result"] == "fail" and (c["detail"] or "").startswith("CARD_EXPIRED")
                       for c in checks)

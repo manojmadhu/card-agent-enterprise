@@ -24,7 +24,10 @@ class FieldSpec(BaseModel):
     @field_validator("regex")
     @classmethod
     def _compiles(cls, v: str) -> str:
-        re.compile(v)
+        try:
+            re.compile(v)
+        except re.error as e:                  # surface as a validation error (422), not a crash
+            raise ValueError(f"regex does not compile: {e}") from e
         return v
 
     @field_validator("roi")

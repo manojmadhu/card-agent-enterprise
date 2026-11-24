@@ -1,4 +1,4 @@
-"""Backend-neutral types for the card store."""
+"""Shared types for the card store (snapshot, reference hits, reference preparation)."""
 from __future__ import annotations
 
 import base64
@@ -19,10 +19,6 @@ from .keywords import KeywordIndex
 
 class StoreUnavailable(RuntimeError):
     """The vector store could not be reached; the API maps this to HTTP 503."""
-
-
-class AdminUnsupported(RuntimeError):
-    """Card management through the API needs a backend that supports incremental writes."""
 
 
 @dataclass(frozen=True)
@@ -67,17 +63,6 @@ class StoreSnapshot:
                                     for v in f.variants]}
                       for f in sorted(self.families.values(), key=lambda x: x.id)],
         }
-
-
-class CardStore(Protocol):
-    backend: str
-    supports_admin: bool
-
-    def snapshot(self, rebuild: bool = False) -> StoreSnapshot: ...
-
-    def current_version(self) -> str: ...
-
-    def healthy(self) -> bool: ...
 
 
 # ---------------------------------------------------------------- reference preparation

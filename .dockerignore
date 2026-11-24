@@ -1,5 +1,7 @@
-data/samples*
-data/index
+data/run_store
+data/evaluations
+data/reference_store
+models/dinov2-small
 data/*.json
 **/__pycache__
 .venv

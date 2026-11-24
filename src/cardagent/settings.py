@@ -46,8 +46,9 @@ class RetrievalCfg(BaseModel):
 
 
 class QdrantCfg(BaseModel):
+    """The only store: card families, reference vectors, runs, settings and evaluations."""
     url: str = "http://127.0.0.1:6333"   # not "localhost": Windows tries IPv6 first (~2 s per call)
-    api_key: str = ""                # set via CARDAGENT_VECTOR_STORE__QDRANT__API_KEY
+    api_key: str = ""                # set via CARDAGENT_QDRANT__API_KEY
     prefer_grpc: bool = False
     timeout_s: float = 10
     location: str = ""               # ":memory:" = in-process (tests); overrides url
@@ -59,17 +60,21 @@ class QdrantCfg(BaseModel):
     sync_on_startup: bool = False    # sync the file registry into Qdrant when the service starts
 
 
-class VectorStoreCfg(BaseModel):
-    backend: Literal["faiss", "qdrant"] = "faiss"
-    qdrant: QdrantCfg = QdrantCfg()
-
-
-class ConsoleCfg(BaseModel):
-    """Compatibility API for the Card Agent Console (card-agent-web), mounted at /console/v1."""
+class RunsCfg(BaseModel):
+    """Run history (every validation) and the human review queue, stored in Qdrant."""
     enabled: bool = True
-    default_country: str = "ae"          # country for families the console creates (console ids have none)
-    require_admin_token: bool = True     # writes need X-Admin-Token; false = no auth (local dev only)
-    cors_origins: list[str] = []         # browser origins allowed to call the API, e.g. http://localhost:5173
+    store_images: bool = True        # keep the uploaded photo with each run (needed for review + enroll)
+    store_dir: str = "data/run_store"
+    retention_days: int = 30         # runs (and their photos) older than this are deleted; 0 = keep forever
+    stats_max_runs: int = 50000      # cap on runs scanned for one /v1/stats call
+
+
+class EvaluationCfg(BaseModel):
+    """Labelled evaluation sets and evaluation reports."""
+    store_dir: str = "data/evaluations"
+    max_set_bytes: int = 500_000_000  # largest evaluation-set zip accepted
+    min_accept_precision: float = 0.99
+    min_status_agreement: float = 0.90
 
 
 class ScoringCfg(BaseModel):
@@ -108,6 +113,7 @@ class ApiCfg(BaseModel):
     max_image_bytes: int = 8_000_000
     allowed_content_types: list[str] = ["image/jpeg", "image/png", "image/webp"]
     idempotency_cache_size: int = 2000
+    cors_origins: list[str] = []     # browser origins allowed to call the API (e.g. the web console)
 
 
 class LoggingCfg(BaseModel):
@@ -127,12 +133,11 @@ class _YamlSource(PydanticBaseSettingsSource):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CARDAGENT_", env_nested_delimiter="__", extra="ignore")
 
-    registry_dir: str = "registry"
-    index_dir: str = "data/index"
-    strict_index_version: bool = False
+    registry_dir: str = "registry"   # optional git-managed card files, imported with /v1/registry/sync
     embedder: EmbedderCfg = EmbedderCfg()
-    vector_store: VectorStoreCfg = VectorStoreCfg()
-    console: ConsoleCfg = ConsoleCfg()
+    qdrant: QdrantCfg = QdrantCfg()
+    runs: RunsCfg = RunsCfg()
+    evaluation: EvaluationCfg = EvaluationCfg()
     ocr: OcrCfg = OcrCfg()
     retrieval: RetrievalCfg = RetrievalCfg()
     scoring: ScoringCfg = ScoringCfg()

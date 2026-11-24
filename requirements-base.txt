@@ -9,6 +9,5 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 prometheus-client>=0.20
-faiss-cpu>=1.8
 qdrant-client==1.18.0        # keep the client minor version equal to the Qdrant server (v1.18.x)
 pytesseract>=0.3.10

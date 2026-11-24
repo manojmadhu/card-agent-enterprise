@@ -60,6 +60,7 @@ class QualityInfo(BaseModel):
 class ValidationResult(BaseModel):
     schema_version: str = SCHEMA_VERSION
     request_id: str
+    run_id: str | None = None          # id in the run history (GET /v1/runs/{run_id}); null when runs are disabled
     status: Status
     reasons: list[str]
     card: CardInfo | None = None

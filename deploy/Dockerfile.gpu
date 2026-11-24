@@ -16,9 +16,9 @@ COPY registry ./registry
 COPY tools ./tools
 # DINOv2 ONNX file exported with tools/export_dinov2_onnx.py (not downloaded at runtime)
 COPY models/dinov2 ./models/dinov2
-RUN useradd -r -u 10001 agent && mkdir -p /app/data/index /app/data/reference_store && chown -R agent /app/data
+RUN useradd -r -u 10001 agent && mkdir -p /app/data/reference_store /app/data/run_store /app/data/evaluations && chown -R agent /app/data
 USER agent
-RUN python3 tools/build_index.py --validate-only
+RUN python3 tools/sync_registry.py --validate-only
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD curl -fs http://localhost:8080/health/ready || exit 1
 # vectors live in Qdrant: the registry-sync service (docker-compose.yml) loads them before the agent starts

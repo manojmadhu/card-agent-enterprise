@@ -42,71 +42,80 @@ export CARDAGENT_ADMIN_TOKEN=$(openssl rand -hex 24)
 export QDRANT_API_KEY=$(openssl rand -hex 24)
 docker compose -f deploy/docker-compose.yml up -d     # qdrant -> registry-sync (one-shot) -> agent
 CARDAGENT_VLM_ENABLED=true docker compose -f deploy/docker-compose.yml --profile vlm up -d
-curl -s localhost:8080/health/ready                    # "vector_store": "qdrant", reference count
+curl -s localhost:8080/health/ready                    # registry version, families, reference count
 ```
 Qdrant runs on the private network only (not published on the host), with an API key. Several
 agent replicas/workers can share it: each picks up card changes within
-`vector_store.qdrant.refresh_seconds` (default 5 s). For HA run a 3-node Qdrant cluster with
-replication factor 2 (see the Qdrant docs) and point `vector_store.qdrant.url` at it.
+`qdrant.refresh_seconds` (default 5 s). For HA run a 3-node Qdrant cluster with
+replication factor 2 (see the Qdrant docs) and point `qdrant.url` at it. With several replicas, mount
+`run_store`, `evaluations` and `reference_store` on shared storage (photos and reports live there).
 
 Switching embedder (e.g. classic → DINOv2) changes the embedding space: the service refuses to start
-until you run `python tools/build_index.py --reembed`; then re-run the evaluation and recalibrate
+until you run `python tools/sync_registry.py --reembed` (or `POST /v1/registry/sync?reembed=true`
+from a replica already running the new embedder); then re-run the evaluation and recalibrate
 `embedder.similarity_floor`.
 
-**Backups.** Qdrant holds the vectors *and* API-created card definitions: snapshot both collections
-(`POST /collections/cardagent_refs/snapshots`, `.../cardagent_families/snapshots` on the Qdrant API) on a
-schedule, and back up the `reference_store` volume (original images uploaded through the API — needed
-to re-embed after an embedder change). Registry-owned cards can always be rebuilt from Git with
-`tools/build_index.py`.
+**Backups.** Qdrant holds the cards, vectors, runs, review decisions, settings overrides and
+evaluations: snapshot all four collections (`POST /collections/cardagent_refs/snapshots`, and the same
+for `cardagent_families`, `cardagent_runs`, `cardagent_evaluations` on the Qdrant API) on a schedule.
+Back up the `reference_store` volume (reference images uploaded through the API — needed to re-embed
+after an embedder change) and, if you keep them, `run_store` and `evaluations`. Registry-owned cards
+can always be rebuilt from Git with `tools/sync_registry.py`.
+
+**Data retention.** Runs and their photos are deleted after `runs.retention_days` (default 30, checked
+hourly; `POST /v1/runs/prune` on demand). Set `runs.store_images=false` to keep no photos at all (then
+review enrollment and evaluation sets from runs are not available).
 
 ## 4. Onboarding, changing and removing cards
-Two ways; both touch **only the affected card** (no full re-index) and go live on all replicas within
-`refresh_seconds`.
+The platform starts empty. Two ways to manage cards; both touch **only the affected card** (no full
+re-index) and go live on all replicas within `refresh_seconds`. Endpoint details: [API.md](API.md).
 
-**A. Git-managed (recommended for programmes with an approval process)**
-1. Collect consented photos: ≥ 5–20 clean references per variant + 50–200 realistic test photos per variant
-   (lighting, glare, angles, worn cards, app screenshots if accepted).
-2. Add/extend `registry/cards/<cc>/<programme>.yaml` (keywords EN+AR, negative keywords for look-alikes,
-   variant colours/keywords/prefixes, field ROIs on the reference image, rules).
-3. Put references in `registry/refs/<family>/<variant>/`.
-4. CI: `python tools/build_index.py --validate-only` → sync a staging Qdrant → `python tools/evaluate.py --manifest <labelled set>`
-   on **new and existing** cards (a new programme can steal matches from an old one). Merge only on `GATE: PASS`.
-5. Deploy: `docker compose run --rm registry-sync` (or `POST /v1/admin/cards/sync`). Only new/changed/removed
-   YAML and images are processed; to **remove** a card, delete its YAML and `registry/refs/<family>/` and sync.
-6. Watch for a week: per-family REVIEW rate, `cardagent_reasons_total`, confusion from human reviews.
-   Roll back = sync the previous Git revision.
+Before either: collect consented photos — 3–20 clean references per variant, plus 50–200 realistic
+test photos per variant (lighting, glare, angles, worn cards, app screenshots if accepted) for the
+evaluation set. Write the definition (keywords EN+AR, negative keywords for look-alikes, variant
+colours/keywords/prefixes, field ROIs on the reference image, rules); `examples/cards/` has templates.
 
-**B. Admin API (header `X-Admin-Token`)**
+**A. Through the API (default)**
 ```bash
 H="X-Admin-Token: $CARDAGENT_ADMIN_TOKEN"
-# create / replace a definition (same schema as the YAML files; JSON or YAML body)
 curl -X PUT -H "$H" -H "Content-Type: application/yaml" --data-binary @new_card.yaml \
-     localhost:8080/v1/admin/cards/ae.newcard
-# upload reference images for a variant (flat scans or photos; the card is detected and straightened)
+     localhost:8080/v1/cards/ae.newcard                                     # create / replace
 curl -X POST -H "$H" -F images=@gold_1.jpg -F images=@gold_2.jpg \
-     localhost:8080/v1/admin/cards/ae.newcard/variants/gold/references
-curl -H "$H" localhost:8080/v1/admin/cards/ae.newcard                    # definition + reference ids
-curl -X DELETE -H "$H" localhost:8080/v1/admin/cards/ae.newcard/references/<ref_id>   # one image
-curl -X DELETE -H "$H" localhost:8080/v1/admin/cards/ae.newcard                       # whole card
+     localhost:8080/v1/cards/ae.newcard/variants/gold/references            # per variant
+curl localhost:8080/v1/cards/ae.newcard                                     # variants_without_references must be []
+curl -H "$H" localhost:8080/v1/cards/ae.newcard/references                  # reference ids
+curl -X DELETE -H "$H" localhost:8080/v1/cards/ae.newcard/references/<ref_id>   # one image
+curl -X DELETE -H "$H" localhost:8080/v1/cards/ae.newcard                       # whole card
 ```
-Cards created through the API are owned by the API: registry syncs never modify or delete them. Cards
-from `registry/` are owned by Git: the API answers `409` for changes unless `?force=true`
-(a forced PUT moves ownership to the API; a forced DELETE lasts until the next sync unless the YAML is
-removed too). Every admin action is written to the JSON log (`"event": "card_admin"`).
-Run the evaluation gate after API changes too, before relying on automatic ACCEPTs for the new card.
+Then run an evaluation with test photos of the new card **and** existing cards (a new programme can
+steal matches from an old one) before relying on automatic ACCEPTs. Every admin action is written to
+the JSON log (`"event": "admin"`).
 
-### From the Card Agent Console
-The web console manages cards through `/console/v1` (see [CONSOLE_API.md](CONSOLE_API.md)). On Qdrant it uses
-the same card store and ownership rule as `/v1/admin/cards`: cards it creates are API-owned; editing a
-registry-owned card returns 409 until it is forced (`?force=true`). On FAISS it edits `registry/` files and
-keeps replaced or deleted files under `registry/.deleted/` — commit console-made changes to git yourself.
+**B. Git-managed (for programmes with an approval process)**
+1. Add `registry/cards/<cc>/<programme>.yaml` and the references in `registry/refs/<family>/<variant>/`.
+2. CI: `python tools/sync_registry.py --validate-only` → sync a staging Qdrant →
+   `python tools/evaluate.py --manifest <labelled set>/manifest.json`. Merge only when the gate passes.
+3. Deploy: `docker compose run --rm registry-sync` (or `POST /v1/registry/sync`). Only new/changed/removed
+   files are processed; to **remove** a card, delete its YAML and `registry/refs/<family>/` and sync.
+   Roll back = sync the previous Git revision.
+
+Registry-owned cards answer `409` to API changes unless `?force=true` (a forced PUT moves ownership to
+the API; a forced DELETE lasts until the next sync unless the files are removed too). API-owned cards
+are never modified by a sync.
+
+**After go-live:** watch the per-family REVIEW rate (`GET /v1/stats?family=…`), work the review queue,
+enroll good photos of new print runs (`enroll: true`), and rebuild an evaluation set from reviewed runs
+every few weeks.
 
 ## 5. Calibration and the evaluation gate
-`tools/evaluate.py` reports: status agreement, **ACCEPT precision** (share of accepts that were
+Evaluations run through the API (`/v1/evaluation-sets`, `/v1/evaluations`, see API.md §6) or in CI with
+`tools/evaluate.py`. The report has: status agreement, **ACCEPT precision** (share of accepts that were
 correct card + correct fields), automation rate, per-field accuracy, family confusion, latency p50/p95.
 Gate defaults: ACCEPT precision ≥ 0.99 and status agreement ≥ 0.90 (tune per business risk).
-Thresholds to tune on real data (`config/settings.yaml → scoring/retrieval`): `family_min/margin`,
-`variant_min/margin`, `inliers_baseline/full_score`, `similarity_floor`, `geometry_required_without_text`.
+Thresholds to tune on real data: `family_min/margin`, `variant_min/margin`, `inliers_baseline/full_score`,
+`similarity_floor`, `geometry_required_without_text`, `field_min_confidence`. Workflow: run a what-if
+evaluation (`POST /v1/evaluations` with `"settings": {...}`), compare with the baseline, then apply with
+`PATCH /v1/settings` (no restart) or put the values in `config/settings.yaml`.
 Recommended rollout: shadow mode → assisted (staff confirm) → automatic ACCEPT.
 
 ## 6. Monitoring & alerts (Prometheus)
@@ -122,11 +131,13 @@ Recommended rollout: shadow mode → assisted (staff confirm) → automatic ACCE
 ## 7. Runbook
 | Symptom | Check / action |
 |---|---|
-| `/health/ready` 503 | startup failed: logs; usually invalid YAML, missing ONNX file, or Qdrant unreachable |
-| Validate returns 503 "vector store unavailable" | Qdrant down/unreachable: check the `qdrant` container, API key, network; the agent recovers automatically |
-| Startup error "built with embedder … Run: build_index.py --reembed" | embedder/model changed since the last sync: run `python tools/build_index.py --reembed` |
+| `/health/ready` 503 | startup failed: logs; usually a missing ONNX file or Qdrant unreachable |
+| Any call returns 503 "Qdrant unavailable" | Qdrant down/unreachable: check the `qdrant` container, API key, network; the agent recovers automatically |
+| Startup error "built with embedder … Run: python tools/sync_registry.py --reembed" | embedder/model changed: run that command once |
 | Card change not visible on a replica | wait `refresh_seconds`; `GET /v1/registry` shows the revision each replica serves |
-| Reload returns 422 | YAML validation error in message; old version still serving |
+| Sync returns 422 | YAML validation error in the message; nothing was changed |
+| Settings change not applied | `GET /v1/settings` on that replica (`overrides`); replicas apply them within `refresh_seconds` |
+| Review queue grows | `GET /v1/stats` → `top_reasons`; tune thresholds with a what-if evaluation, or add references for the family |
 | Many `AMBIGUOUS_CARD_TYPE` for two programmes | add negative keywords; add more distinctive references; check colours |
 | Many `FIELD_UNREADABLE` for one variant | ROI wrong for a new print run — fix ROI on the reference; enable PaddleOCR/VLM |
 | VLM timeouts | circuit breaker opens automatically (decisions degrade to REVIEW); check Ollama GPU memory |

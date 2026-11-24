@@ -1,13 +1,12 @@
 # Single T4 host: card agent + Qdrant vector store + optional local VLM sharing one 16 GB GPU.
 # `internal: true` network = containers have NO route to the internet.
 #
-# Start order: qdrant -> registry-sync (one-shot incremental sync of registry/ into Qdrant) -> cardagent.
-# Card changes afterwards: admin API (/v1/admin/cards...) or edit registry/ and
-#   docker compose -f deploy/docker-compose.yml run --rm registry-sync
+# Start order: qdrant -> registry-sync (one-shot incremental import of registry/ into Qdrant) -> cardagent.
+# The platform starts empty: add cards through the API (PUT /v1/cards/{id} + reference uploads), or
+# commit them to registry/ and run   docker compose -f deploy/docker-compose.yml run --rm registry-sync
 x-agent-env: &agent-env
-  CARDAGENT_VECTOR_STORE__BACKEND: qdrant
-  CARDAGENT_VECTOR_STORE__QDRANT__URL: http://qdrant:6333
-  CARDAGENT_VECTOR_STORE__QDRANT__API_KEY: ${QDRANT_API_KEY:?set a Qdrant API key}
+  CARDAGENT_QDRANT__URL: http://qdrant:6333
+  CARDAGENT_QDRANT__API_KEY: ${QDRANT_API_KEY:?set a Qdrant API key}
 
 services:
   qdrant:
@@ -22,7 +21,7 @@ services:
   registry-sync:                             # one-shot: validate registry/ and apply only the differences
     image: cardagent:1.0.0-gpu
     build: {context: .., dockerfile: deploy/Dockerfile.gpu}
-    command: ["python3", "tools/build_index.py"]
+    command: ["python3", "tools/sync_registry.py"]
     environment: *agent-env
     volumes:
       - ../registry:/app/registry:ro
@@ -40,8 +39,10 @@ services:
       CARDAGENT_VLM__URL: http://vlm:11434
       CARDAGENT_VLM__MODEL: qwen2.5vl:7b
     volumes:
-      - ../registry:/app/registry:ro          # source for POST /v1/admin/cards/sync
+      - ../registry:/app/registry:ro          # source for POST /v1/registry/sync
       - reference_store:/app/data/reference_store   # copies of reference images uploaded via the API
+      - run_store:/app/data/run_store         # photos of validated cards (run history, review queue)
+      - evaluations:/app/data/evaluations     # evaluation sets and reports
     ports: ["127.0.0.1:8080:8080"]           # put behind your internal gateway / mTLS
     networks: [edge, private]
     depends_on:
@@ -75,4 +76,6 @@ networks:
 volumes:
   qdrant_storage: {}
   reference_store: {}
+  run_store: {}
+  evaluations: {}
   ollama: {}

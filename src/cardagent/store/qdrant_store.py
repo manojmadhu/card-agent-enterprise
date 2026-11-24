@@ -30,7 +30,7 @@ from ..registry.models import CardFamily
 from ..settings import QdrantCfg
 from ..vision import normalise as normalise_mod
 from ..vision.features import Keypoints
-from .base import (AdminUnsupported, PreparedRef, RefHit, StoreSnapshot, StoreUnavailable,  # noqa: F401
+from .base import (PreparedRef, RefHit, StoreSnapshot, StoreUnavailable,  # noqa: F401
                    definition_hash, keypoints_from_b64, keypoints_to_b64, prepare_reference,
                    reference_keypoints, rois_signature)
 from .keywords import KeywordIndex
@@ -112,9 +112,6 @@ def make_client(cfg: QdrantCfg, root: Path):
 
 
 class QdrantCardStore:
-    backend = "qdrant"
-    supports_admin = True
-
     def __init__(self, cfg: QdrantCfg, embedder, n_features: int, root: Path, client=None,
                  allow_embedder_change: bool = False):
         from qdrant_client import models as m
@@ -143,7 +140,7 @@ class QdrantCardStore:
                 raise RuntimeError(
                     f"Qdrant collection '{self.refs_col}' was built with embedder {meta.get('embedder')} "
                     f"(dim {meta.get('dim')}) but the service uses {self.embedder.name} (dim {self.embedder.dim}). "
-                    "Run: python tools/build_index.py --reembed")
+                    "Run: python tools/sync_registry.py --reembed")
         if not c.collection_exists(self.refs_col):
             c.create_collection(self.refs_col,
                                 vectors_config=m.VectorParams(size=self.embedder.dim, distance=m.Distance.COSINE),

@@ -165,12 +165,18 @@ def main():
     ap.add_argument("--refs-per-variant", type=int, default=3)
     ap.add_argument("--scale-photos-per-variant", type=int, default=1,
                     help="extra photos for EVERY variant into data/samples_scale (0 = skip)")
+    ap.add_argument("--regenerate-refs", action="store_true",
+                    help="also rewrite registry/refs (default: keep the committed reference images; "
+                         "fonts differ per OS, so regenerated images differ from the ones in Git)")
     a = ap.parse_args()
     rnd = random.Random(7)
 
     demo_dir = ROOT / "registry" / "cards" / "demo"
     shutil.rmtree(demo_dir, ignore_errors=True)
-    shutil.rmtree(ROOT / "registry" / "refs", ignore_errors=True)
+    refs_root = ROOT / "registry" / "refs"
+    write_refs = a.regenerate_refs or not any(refs_root.rglob("*.png"))
+    if write_refs:
+        shutil.rmtree(refs_root, ignore_errors=True)
     demos = demo_families(a.demo_families, rnd)
     if demos:
         demo_dir.mkdir(parents=True)
@@ -189,11 +195,13 @@ def main():
 
     for f in fams:
         for v in f["variants"]:
-            d = ROOT / "registry" / "refs" / f["id"] / v["id"]
-            d.mkdir(parents=True, exist_ok=True)
+            d = refs_root / f["id"] / v["id"]
             for i in range(a.refs_per_variant):
+                # always rendered (keeps the random sequence, so the test photos are identical either way)
                 img = render(f, v, rnd.choice(NAMES), num_for(f, v, rnd), "06/29", "784-1988-7654321-2", f["_style"])
-                cv2.imwrite(str(d / f"ref_{i}.png"), img)
+                if write_refs:
+                    d.mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(str(d / f"ref_{i}.png"), img)
 
     sd = ROOT / "data" / "samples"
     shutil.rmtree(sd, ignore_errors=True)
@@ -250,7 +258,8 @@ def main():
         (sc / "manifest.json").write_text(json.dumps(sm, indent=2), encoding="utf-8")
         print(f"scale set: {len(sm)} photos in {sc}")
     nv = sum(len(f["variants"]) for f in fams)
-    print(f"{len(fams)} families, {nv} variants, {nv * a.refs_per_variant} reference images, {len(manifest)} test photos")
+    print(f"{len(fams)} families, {nv} variants, {len(manifest)} test photos; reference images "
+          + (f"regenerated ({nv * a.refs_per_variant})" if write_refs else "kept from registry/refs (--regenerate-refs to rewrite)"))
 
 
 if __name__ == "__main__":

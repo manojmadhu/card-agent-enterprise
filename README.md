@@ -7,20 +7,70 @@ fields, validates them, and returns a strict JSON decision: `ACCEPT` / `REVIEW` 
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Deployment, GPU sizing (NVIDIA T4), onboarding cards, runbook: [docs/OPERATIONS.md](docs/OPERATIONS.md)
 
-## Quick start (CPU)
-```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"                           # + OS package: tesseract-ocr tesseract-ocr-ara
-docker run -d --name cardagent-qdrant -p 127.0.0.1:6333:6333 \
-  -v cardagent_qdrant:/qdrant/storage qdrant/qdrant:v1.18.1          # vector store
-python tools/make_samples.py                      # SYNTHETIC registry refs + test photos
-python tools/build_index.py                       # validate registry, sync it into Qdrant (incremental)
-python tools/evaluate.py --today 2026-11-18       # scorecard + PASS/FAIL gate
-pytest -q                                         # no Qdrant server needed (in-process Qdrant for its tests)
-uvicorn cardagent.api.app:app --port 8080         # API
-curl -F image=@data/samples/fazaa_gold.jpg http://127.0.0.1:8080/v1/cards/validate
+## Run on a local PC
+**Windows: follow [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md)** — full step-by-step guide with a
+troubleshooting table. The short version is below.
+
+**You need:** Python 3.10–3.12 (64-bit), Git, Tesseract OCR with English + Arabic data, and — for the
+full setup only — Docker (for Qdrant). There are two ways to run it:
+
+| | Quick check | Full setup (production-like) |
+|---|---|---|
+| Matcher | built-in `classic` (no model file) | DINOv2 (`models/dinov2/dinov2_vits14.onnx`, ~90 MB) |
+| Card store | `faiss` (files, no server) | Qdrant server (Docker) |
+| Use for | first run, CI, a PC without Docker | real accuracy, card management API, console writes |
+
+### Windows (PowerShell)
+```powershell
+git clone -b feature/console-api https://github.com/manojmadhu/card-agent-enterprise.git
+cd card-agent-enterprise
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1                      # every new terminal: activate first
+pip install -e ".[dev]"
+python tools/make_samples.py                      # synthetic test photos -> data/samples (keeps registry/refs)
+
+# quick check (no Docker, no model)
+$env:CARDAGENT_VECTOR_STORE__BACKEND = "faiss"
+$env:CARDAGENT_EMBEDDER__KIND = "classic"
+python tools/build_index.py --force
+python tools/evaluate.py --today 2026-11-24
+
+# run the API, then in a second terminal: curl.exe http://127.0.0.1:8081/health/ready
+python -m uvicorn cardagent.api.app:app --host 127.0.0.1 --port 8081
 ```
-No Docker? Set `vector_store.backend: faiss` in `config/settings.yaml` (file index, no card-management API).
+
+### Linux / macOS
+```bash
+git clone -b feature/console-api https://github.com/manojmadhu/card-agent-enterprise.git
+cd card-agent-enterprise
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"                           # + OS packages: tesseract-ocr tesseract-ocr-ara
+python tools/make_samples.py
+export CARDAGENT_VECTOR_STORE__BACKEND=faiss CARDAGENT_EMBEDDER__KIND=classic   # quick check
+python tools/build_index.py --force
+python tools/evaluate.py --today 2026-11-24
+python -m uvicorn cardagent.api.app:app --host 127.0.0.1 --port 8081
+```
+
+### Full setup (both systems)
+1. **DINOv2 model** — copy `models/dinov2/dinov2_vits14.onnx` from another install, or create it once:
+   `pip install torch --index-url https://download.pytorch.org/whl/cpu` ·
+   `pip install transformers onnx onnxscript huggingface_hub` ·
+   `hf download facebook/dinov2-small --local-dir models/dinov2-small` ·
+   `python tools/export_dinov2_onnx.py --model-dir models/dinov2-small --out models/dinov2/dinov2_vits14.onnx`
+2. **Qdrant** — `docker run -d --name cardagent-qdrant --restart unless-stopped -p 127.0.0.1:6333:6333 -v cardagent_qdrant:/qdrant/storage qdrant/qdrant:v1.18.1`
+3. **Default settings** (clear the quick-check variables) — `python tools/build_index.py` loads the
+   registry into Qdrant (a new Qdrant is empty), then `python tools/evaluate.py` and start the API.
+
+### Try it
+```bash
+curl.exe -F image=@data/samples/fazaa_gold.jpg -F request_id=t1 http://127.0.0.1:8081/v1/cards/validate
+curl.exe -N -F image=@data/samples/fazaa_gold.jpg http://127.0.0.1:8081/console/v1/cards/validate/stream
+python -m pytest -q        # no Qdrant server needed (in-process Qdrant)
+```
+(`curl.exe` on Windows; plain `curl` on Linux/macOS.) Set `CARDAGENT_API__ADMIN_TOKEN` before starting
+the API to use the admin endpoints. Expected on a quick check: `ACCEPT precision 1.0`; a few demo cards
+go to REVIEW and the gate may show FAIL, because the built-in matcher is simpler than DINOv2.
 
 ## API
 | Method | Path | Notes |

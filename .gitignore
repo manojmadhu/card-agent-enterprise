@@ -7,3 +7,4 @@ models/
 *.egg-info/
 data/reference_store/
 registry/.deleted/
+dinov2-small/

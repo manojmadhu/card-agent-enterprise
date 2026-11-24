@@ -1,5 +1,5 @@
 # Pin exact versions from your internal mirror before production (pip-compile / pip freeze).
-opencv-python-headless>=4.9
+opencv-python-headless>=4.9,<5   # OpenCV 5 removed cv2.HOGDescriptor (built-in classic matcher)
 numpy>=1.26
 pillow>=10
 pyyaml>=6

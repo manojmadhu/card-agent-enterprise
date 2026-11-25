@@ -292,7 +292,7 @@ The same evaluation from the command line (CI): `python tools/evaluate.py --mani
 ## 8. Storage (all in Qdrant)
 | Collection | Content |
 |---|---|
-| `<prefix>_refs` | one point per reference image: vector + family, variant, country, sha256, source, ORB keypoints |
+| `<prefix>_refs` | one point per reference image: vector + family, variant, side, country, sha256, source, ORB keypoints |
 | `<prefix>_families` | card definitions, the store revision/embedder meta point, the settings overrides |
 | `<prefix>_runs` | runs (payload only; photos in `runs.store_dir`) |
 | `<prefix>_evaluations` | evaluation sets and evaluations (files and reports in `evaluation.store_dir`) |

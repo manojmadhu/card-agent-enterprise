@@ -75,6 +75,12 @@ test photos per variant (lighting, glare, angles, worn cards, app screenshots if
 evaluation set. Write the definition (keywords EN+AR, negative keywords for look-alikes, variant
 colours/keywords/prefixes, field ROIs on the reference image, rules); `examples/cards/` has templates.
 
+**Data on both sides?** List `sides: [{id: front}, {id: back}]`, give every field its `side`, measure
+each ROI on a reference of that side, and upload references per variant **and side**
+(`…/references?side=back`; Git: `registry/refs/<family>/<variant>/back/`). Collect test photos of both
+sides, and evaluation cases with `"files": {"front": …, "back": …}`. Check
+`GET /v1/cards/{id}` → `missing_references` is empty. See [TWO_SIDED_CARDS.md](TWO_SIDED_CARDS.md).
+
 **A. Through the API (default)**
 ```bash
 H="X-Admin-Token: $CARDAGENT_ADMIN_TOKEN"
@@ -137,6 +143,8 @@ Recommended rollout: shadow mode → assisted (staff confirm) → automatic ACCE
 | Card change not visible on a replica | wait `refresh_seconds`; `GET /v1/registry` shows the revision each replica serves |
 | Sync returns 422 | YAML validation error in the message; nothing was changed |
 | Settings change not applied | `GET /v1/settings` on that replica (`overrides`); replicas apply them within `refresh_seconds` |
+| Many `SIDE_REQUIRED:back` for one programme | the capture app does not ask for the back: prompt for it when the API answers `SIDE_REQUIRED`, or always capture both sides for that programme |
+| `SIDES_MISMATCH` on genuine cards | the back references are missing or show another design: check `reference_images_by_side`; raise `scoring.sides_mismatch_geometry` only after a what-if evaluation |
 | Review queue grows | `GET /v1/stats` → `top_reasons`; tune thresholds with a what-if evaluation, or add references for the family |
 | Many `AMBIGUOUS_CARD_TYPE` for two programmes | add negative keywords; add more distinctive references; check colours |
 | Many `FIELD_UNREADABLE` for one variant | ROI wrong for a new print run — fix ROI on the reference; enable PaddleOCR/VLM |

@@ -27,6 +27,8 @@ class RefHit:
     family_id: str
     variant_id: str
     score: float          # cosine similarity to the query embedding
+    side: str = "front"   # card side the reference shows (references stored before sides existed: front)
+    colour: tuple | None = None   # body colour measured on the reference image
 
 
 class RefView(Protocol):
@@ -46,6 +48,7 @@ class StoreSnapshot:
     keywords: KeywordIndex
     refs: RefView
     ref_counts: dict[tuple[str, str], int] = field(default_factory=dict)
+    side_counts: dict[tuple[str, str, str], int] = field(default_factory=dict)   # (family, variant, side)
 
     @property
     def ref_count(self) -> int:
@@ -58,8 +61,11 @@ class StoreSnapshot:
             "variants": sum(len(f.variants) for f in self.families.values()),
             "reference_images": self.ref_count,
             "items": [{"family": f.id, "country": f.country, "name": f.name,
+                       "sides": f.side_ids,
                        "variants": [{"id": v.id, "name": v.name,
-                                     "reference_images": self.ref_counts.get((f.id, v.id), 0)}
+                                     "reference_images": self.ref_counts.get((f.id, v.id), 0),
+                                     "reference_images_by_side": {s: self.side_counts.get((f.id, v.id, s), 0)
+                                                                  for s in f.side_ids}}
                                     for v in f.variants]}
                       for f in sorted(self.families.values(), key=lambda x: x.id)],
         }
@@ -73,17 +79,23 @@ class PreparedRef:
     colour: tuple[int, int, int]
 
 
-def prepare_reference(card_bgr: np.ndarray, fam: CardFamily, embedder, n_features: int) -> PreparedRef:
-    """Exactly what the index stores per reference image. Personal-data regions (the family's field
-    ROIs) are masked out of the keypoints so verification matches the card design, not names."""
-    img = cv2.resize(card_bgr, (CARD_W, CARD_H), interpolation=cv2.INTER_AREA)
-    mask = design_mask([f.roi for f in fam.fields], CARD_W, CARD_H)
-    return PreparedRef(embedder.embed(img), extract_keypoints(img, n_features, mask), body_colour_rgb(img))
+def _side_mask(fam: CardFamily, side: str):
+    return design_mask([f.roi for f in fam.fields_on(side)], CARD_W, CARD_H)
 
 
-def reference_keypoints(card_bgr: np.ndarray, fam: CardFamily, n_features: int) -> Keypoints:
+def prepare_reference(card_bgr: np.ndarray, fam: CardFamily, embedder, n_features: int,
+                      side: str = "front") -> PreparedRef:
+    """Exactly what the index stores per reference image. Personal-data regions (the ROIs of the
+    fields printed on this side) are masked out of the keypoints so verification matches the card
+    design, not names."""
     img = cv2.resize(card_bgr, (CARD_W, CARD_H), interpolation=cv2.INTER_AREA)
-    return extract_keypoints(img, n_features, design_mask([f.roi for f in fam.fields], CARD_W, CARD_H))
+    return PreparedRef(embedder.embed(img), extract_keypoints(img, n_features, _side_mask(fam, side)),
+                       body_colour_rgb(img))
+
+
+def reference_keypoints(card_bgr: np.ndarray, fam: CardFamily, n_features: int, side: str = "front") -> Keypoints:
+    img = cv2.resize(card_bgr, (CARD_W, CARD_H), interpolation=cv2.INTER_AREA)
+    return extract_keypoints(img, n_features, _side_mask(fam, side))
 
 
 def keypoints_to_b64(kp: Keypoints) -> str:
@@ -104,5 +116,9 @@ def definition_hash(fam: CardFamily) -> str:
 
 
 def rois_signature(fam: CardFamily) -> str:
-    """Keypoints depend only on the field ROIs (masked regions); re-extract when this changes."""
-    return hashlib.sha256(json.dumps(sorted([list(f.roi) for f in fam.fields])).encode()).hexdigest()[:16]
+    """Keypoints depend only on the field ROIs per side (masked regions); re-extract when this changes.
+    Front-side ROIs hash as before sides existed, so existing families keep their signature."""
+    items = [list(f.roi) if f.side == "front" else [f.side, *f.roi] for f in fam.fields]
+    legacy = all(f.side == "front" for f in fam.fields)
+    items = sorted(items) if legacy else sorted(items, key=json.dumps)
+    return hashlib.sha256(json.dumps(items).encode()).hexdigest()[:16]

@@ -6,6 +6,12 @@ Snapshots are `{steps: StepState[], normalisedUrl?, result?}` where StepState is
 StepTrace turns the agent's stage events (agent.process(trace=...)) into StepState objects with a
 `detail` per step: quality checks, OCR tokens, embedding, shortlist + verified references, family
 and variant candidates with their signals, extracted fields, rule results, decision.
+
+Two photos (both sides of a card): the per-photo steps (ingest, quality, normalise, ocr, embed) are
+tracked per photo and merged into the same step: status = the worst finished photo (running while
+any photo is still in it), summary "front: … · back: …", and detail = the first photo's detail plus
+`photos: [{photo, label, status, summary, detail}]`. Snapshots then also carry
+`photos: [{photo, label, side, normalisedUrl}]`. A single photo produces exactly the 2.0 trace.
 """
 from __future__ import annotations
 
@@ -30,6 +36,8 @@ STEPS = [
     {"id": "decision", "title": "Decision", "stage": "8"},
 ]
 _IDS = [s["id"] for s in STEPS]
+PER_PHOTO = ("ingest", "quality", "normalise", "ocr", "embed")
+_RANK = {"pending": 0, "skip": 1, "pass": 2, "warn": 3, "fail": 4}
 MAX_VECTOR_VALUES = 768          # the console only draws the vector; DINOv2-small is 768-d
 
 
@@ -47,11 +55,18 @@ def card_data_url(card_bgr: np.ndarray, width: int = 380) -> str:
 class StepTrace:
     """Accumulates StepState objects; `on_event` returns the steps that changed (to send)."""
 
-    def __init__(self, settings: Settings, families: dict, ref_total: int, source: str = "api upload"):
+    def __init__(self, settings: Settings, families: dict, ref_total: int, source: str = "api upload",
+                 photos: list[str] | None = None):
+        """photos: one label per uploaded photo (declared side or "photo 1"); default one photo."""
         self.s, self.families, self.ref_total, self.source = settings, families, ref_total, source
-        self.steps = {sid: {"id": sid, "status": "pending", "summary": "", "ms": 0, "detail": None} for sid in _IDS}
+        self.steps = {sid: _blank(sid) for sid in _IDS}
         self.normalised_url: str | None = None
         self.family_id: str | None = None
+        self.labels = list(photos or ["photo 1"])
+        self.multi = len(self.labels) > 1
+        self.photo_steps = [{sid: _blank(sid) for sid in _IDS} for _ in self.labels]
+        self.photo_urls: list[str | None] = [None] * len(self.labels)
+        self.photo_sides: list[str | None] = [None] * len(self.labels)
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
@@ -62,6 +77,8 @@ class StepTrace:
         snap = {"steps": [dict(self.steps[i]) for i in _IDS]}
         if self.normalised_url:
             snap["normalisedUrl"] = self.normalised_url
+        if self.multi:
+            snap["photos"] = self.photos_view()
         if result is not None:
             snap["result"] = result
         return snap
@@ -79,14 +96,52 @@ class StepTrace:
                 out.append(self.steps[sid])
         return out
 
+    def photos_view(self) -> list[dict]:
+        return [{"photo": i, "label": self.labels[i], "side": self.photo_sides[i], "normalisedUrl": self.photo_urls[i]}
+                for i in range(len(self.labels))]
+
     # ------------------------------------------------------------------ events
-    def on_event(self, event: str, step: str, data: dict | None = None) -> list[dict]:
+    def on_event(self, event: str, step: str, data: dict | None = None, photo: int | None = None) -> list[dict]:
+        if self.multi and photo is not None and step in PER_PHOTO:
+            return self._photo_event(event, step, data, photo)
         if event == "start":
             if step in self.steps:
                 self.steps[step]["status"] = "running"
                 return [self.steps[step]]
             return []
         return getattr(self, f"_done_{step}")(data or {})
+
+    def _photo_event(self, event, step, data, i) -> list[dict]:
+        """Run the normal step logic on photo i's own steps, then merge the photos into the shared step."""
+        shared_steps, shared_url = self.steps, self.normalised_url
+        self.steps, self.normalised_url = self.photo_steps[i], self.photo_urls[i]
+        try:
+            if event == "start":
+                self.steps[step]["status"] = "running"
+                touched = [step]
+            else:
+                touched = [st["id"] for st in getattr(self, f"_done_{step}")(data or {})]
+            self.photo_urls[i] = self.normalised_url
+        finally:
+            self.steps, self.normalised_url = shared_steps, shared_url
+        if self.normalised_url is None and self.photo_urls[0]:
+            self.normalised_url = self.photo_urls[0]
+        return [self._merge(sid) for sid in dict.fromkeys(touched) if sid in PER_PHOTO]
+
+    def _merge(self, sid: str) -> dict:
+        per = [ps[sid] for ps in self.photo_steps]
+        if any(p["status"] == "running" for p in per) or (
+                any(p["status"] == "pending" for p in per) and any(p["status"] != "pending" for p in per)):
+            status = "running"
+        else:
+            status = max((p["status"] for p in per), key=lambda s: _RANK.get(s, 0))
+        first = next((p["detail"] for p in per if p["detail"] is not None), None)
+        detail = {**(first or {}), "photos": [{"photo": i, "label": self.labels[i], "status": p["status"],
+                                                "summary": p["summary"], "detail": p["detail"]}
+                                               for i, p in enumerate(per)]}
+        summary = " · ".join(f"{self.labels[i]}: {p['summary']}" for i, p in enumerate(per) if p["summary"])
+        self.steps[sid].update(status=status, summary=summary, detail=detail, ms=sum(p["ms"] for p in per))
+        return self.steps[sid]
 
     def _done_ingest(self, d):
         if d.get("width") is None:
@@ -243,18 +298,26 @@ class StepTrace:
                 from ..pipeline.rules import parse_expiry
                 p = parse_expiry(f.get("value"))
                 iso = p.isoformat() if p else None
-            rows.append({"name": spec.name, "required": spec.required, "roi": list(spec.roi), "regex": spec.regex,
+            rows.append({"name": spec.name, "side": spec.side, "required": spec.required, "roi": list(spec.roi),
+                         "regex": spec.regex,
                          "normalise": spec.normalise, "value": f.get("value"), "confidence": f.get("confidence", 0),
                          "source": {"ocr_roi": "ocr"}.get(f.get("source"), f.get("source")), "raw": f.get("raw"),
                          "iso": iso, "ok": bool(f.get("valid_format"))})
         missing = [r["name"] for r in rows if r["required"] and not r["ok"]]
+        if self.multi:
+            for ph in d.get("photos", []):
+                self.photo_sides[ph["photo"]] = ph["side"]
+                if ph["side"]:
+                    self.labels[ph["photo"]] = ph["side"]
+        extra = {} if not self.multi else {"photos": d.get("photos", []), "missing_sides": d.get("missing_sides", []),
+                                           "side_assignment": d.get("side_detail", [])}
         vlm = "enabled" if self.s.vlm.enabled else "disabled"
         summary = (f"{len(rows) - len(missing)}/{len(rows)} extracted · missing {', '.join(missing)}"
                    + ("" if self.s.vlm.enabled else " (VLM fallback off)")) if missing else \
             f"{sum(r['ok'] for r in rows)}/{len(rows)} fields extracted"
         return [self._set("fields", "warn" if missing else "pass", summary,
                           {"fields": rows, "vlm": vlm, "aligned_to_reference": d["aligned"],
-                           "align_shift": d.get("align_shift")}, d["ms"])]
+                           "align_shift": d.get("align_shift"), **extra}, d["ms"])]
 
     def _done_rules(self, d):
         checks = d["checks"]
@@ -270,7 +333,18 @@ class StepTrace:
         """Close the trace from the final result (also covers early exits)."""
         changed = []
         reasons = result["reasons"]
-        if "RETAKE_REQUIRED" in reasons or "INVALID_IMAGE" in reasons:
+        if self.multi:
+            for ph in result.get("photos") or []:
+                self.photo_sides[ph["photo"]] = ph["side"]
+                if ph["side"]:
+                    self.labels[ph["photo"]] = ph["side"]
+            for ps in self.photo_steps:                        # close per-photo steps of unusable photos
+                for sid in PER_PHOTO:
+                    if ps[sid]["status"] in ("pending", "running"):
+                        ps[sid].update(status="skip", summary="skipped", ms=0)
+            for sid in PER_PHOTO:
+                changed.append(self._merge(sid))
+        if ("RETAKE_REQUIRED" in reasons or "INVALID_IMAGE" in reasons) and not result.get("card"):
             changed += self._skip_from("normalise", "skipped — quality gate failed")
         changed += self._skip_from("ingest", "skipped")
         status = result["status"]
@@ -281,4 +355,8 @@ class StepTrace:
         return changed
 
 
-__all__ = ["STEPS", "StepTrace"]
+def _blank(sid: str) -> dict:
+    return {"id": sid, "status": "pending", "summary": "", "ms": 0, "detail": None}
+
+
+__all__ = ["STEPS", "PER_PHOTO", "StepTrace"]

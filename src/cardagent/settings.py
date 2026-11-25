@@ -88,6 +88,9 @@ class ScoringCfg(BaseModel):
     reject_below: float = 0.30
     geometry_required_without_text: float = 0.60
     field_min_confidence: float = 0.55
+    # two photos in one request: each strongly matching (RANSAC geometry score >= this) a DIFFERENT
+    # card family means they are not two sides of the same card -> REVIEW with SIDES_MISMATCH
+    sides_mismatch_geometry: float = 0.30
 
 
 class QualityCfg(BaseModel):

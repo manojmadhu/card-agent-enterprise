@@ -49,13 +49,13 @@ def sync_registry(store: QdrantCardStore, registry_root: Path, prune: bool = Tru
         st["keypoints_refreshed"] += r["keypoints_refreshed"]
 
     # ---- reference images: diff by content hash
-    desired: dict[str, tuple[CardFamily, str, Path, str]] = {}
+    desired: dict[str, tuple[CardFamily, str, Path, str, str]] = {}
     for ref in snap.refs:
         if ref.family_id not in managed:
             continue
         sha = hashlib.sha256(ref.path.read_bytes()).hexdigest()
-        desired[ref_point_id(ref.family_id, ref.variant_id, sha)] = (managed[ref.family_id], ref.variant_id,
-                                                                    ref.path, sha)
+        desired[ref_point_id(ref.family_id, ref.variant_id, sha, ref.side)] = (managed[ref.family_id], ref.variant_id,
+                                                                              ref.path, sha, ref.side)
     current = {r["ref_id"]: r for r in store.list_refs() if r.get("source") == "registry"}
     to_add = [pid for pid in desired if pid not in current]
     to_delete = [pid for pid, r in current.items() if pid not in desired and r["family"] in managed]
@@ -63,13 +63,13 @@ def sync_registry(store: QdrantCardStore, registry_root: Path, prune: bool = Tru
 
     batch = []
     for pid in to_add:
-        fam, vid, path, sha = desired[pid]
+        fam, vid, path, sha, side = desired[pid]
         img = cv2.imread(str(path))
         if img is None:
             log.warning("unreadable reference image %s (skipped)", path)
             continue
-        prep = prepare_reference(img, fam, store.embedder, store.n_features)
-        batch.append((pid, fam, vid, sha, path.name, path, "registry", prep))
+        prep = prepare_reference(img, fam, store.embedder, store.n_features, side)
+        batch.append((pid, fam, vid, sha, path.name, path, "registry", prep, side))
         if len(batch) >= 64:
             store.add_prepared(batch)
             st["references_added"] += len(batch)
@@ -95,7 +95,11 @@ def sync_registry(store: QdrantCardStore, registry_root: Path, prune: bool = Tru
             log.warning("cannot re-embed API reference %s (family or stored image missing)", r["ref_id"])
             continue
         fam = CardFamily.model_validate(doc["definition"])
-        store.add_reference(fam, r["variant"], path.read_bytes(), r["filename"], "api", image_path=path, bump=False)
+        side = r.get("side") or "front"
+        if side not in fam.side_ids:
+            continue
+        store.add_reference(fam, r["variant"], path.read_bytes(), r["filename"], "api", image_path=path, bump=False,
+                            side=side)
         st["api_references_reembedded"] += 1
 
     changed = any(v for k, v in st.items() if k != "references_unchanged")

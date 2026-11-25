@@ -89,3 +89,25 @@ def loaded(client):
 def validate(c: TestClient, image: bytes, request_id: str | None = None, **params):
     data = {"request_id": request_id} if request_id else {}
     return c.post("/v1/cards/validate", files={"image": ("photo.jpg", image, "image/jpeg")}, data=data, params=params)
+
+
+def add_two_sided_card(c: TestClient, family_id: str, refs_per_side: int = 3):
+    """A programme with front and back, and reference images of both sides of every variant."""
+    r = c.put(f"/v1/cards/{family_id}", json=cards.FAMILIES[family_id], headers=ADMIN)
+    assert r.status_code in (200, 201), r.text
+    for v in cards.FAMILIES[family_id]["variants"]:
+        for side in ("front", "back"):
+            files = [("images", (f"{side}_{i}.png", data, "image/png"))
+                     for i, data in enumerate(cards.side_reference_pngs(family_id, v["id"], side, refs_per_side))]
+            r = c.post(f"/v1/cards/{family_id}/variants/{v['id']}/references", files=files,
+                       params={"detect_card": "false", "side": side}, headers=ADMIN)
+            assert r.status_code == 201, r.text
+
+
+def validate_sides(c: TestClient, store: bool = True, **photos):
+    """photos: front=bytes, back=bytes, image=bytes, or images=[bytes, ...]."""
+    files = []
+    for field, data in photos.items():
+        for d in (data if isinstance(data, list) else [data]):
+            files.append((field, (f"{field}.jpg", d, "image/jpeg")))
+    return c.post("/v1/cards/validate", files=files, params={"store": str(store).lower()})

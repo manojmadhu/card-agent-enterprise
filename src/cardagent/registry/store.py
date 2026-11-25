@@ -1,5 +1,11 @@
 """Loads card families + reference image paths. Version hash covers YAML AND reference images,
-so any change to either produces a new registry version (stamped on every result)."""
+so any change to either produces a new registry version (stamped on every result).
+
+Reference layout per variant (front images directly in the variant folder, as before sides existed):
+  registry/refs/<family>/<variant>/*.png          front
+  registry/refs/<family>/<variant>/front/*.png    front (optional explicit folder)
+  registry/refs/<family>/<variant>/back/*.png     back  (the family must list the back side)
+"""
 from __future__ import annotations
 
 import hashlib
@@ -18,6 +24,7 @@ class RefImage:
     family_id: str
     variant_id: str
     path: Path
+    side: str = "front"
 
 
 @dataclass
@@ -60,9 +67,15 @@ def load_registry(root: Path) -> RegistrySnapshot:
     for fam in families.values():
         for v in fam.variants:
             vdir = root / "refs" / fam.id / v.id
-            for p in sorted(vdir.glob("*")) if vdir.exists() else []:
-                if p.suffix.lower() in IMAGE_EXT:
+            if not vdir.exists():
+                continue
+            for side, folder in (("front", vdir), ("front", vdir / "front"), ("back", vdir / "back")):
+                files = [p for p in sorted(folder.glob("*")) if p.is_file() and p.suffix.lower() in IMAGE_EXT] \
+                    if folder.is_dir() else []
+                if files and side not in fam.side_ids:
+                    raise ValueError(f"{folder}: images of side '{side}', but {fam.id} has sides {fam.side_ids}")
+                for p in files:
                     digest.update(p.relative_to(root).as_posix().encode())
                     digest.update(hashlib.sha256(p.read_bytes()).digest())
-                    refs.append(RefImage(fam.id, v.id, p))
+                    refs.append(RefImage(fam.id, v.id, p, side))
     return RegistrySnapshot(version=digest.hexdigest()[:16], families=families, refs=refs)

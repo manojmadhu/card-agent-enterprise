@@ -78,23 +78,34 @@ class EvaluationStore:
         (dst / "photos").mkdir(parents=True)
         cases, skipped = [], 0
         for r in runs:
-            img = run_store.image_file(r)
+            photos = run_store.photo_files(r)
             rev = r.get("review") or {}
-            if img is None or not rev:
+            if not photos or not rev:
                 skipped += 1
                 continue
-            fn = f"photos/{r['run_id']}.img"
-            shutil.copy2(img, dst / fn)
+            sides = {f["photo"]: f.get("side") for f in photos}                  # side the agent used
+            sides.update({e["photo"]: e["side"] for e in rev.get("enrolled_photos") or []})   # reviewer's sides
+            names = []
+            for f in photos:
+                fn = f"photos/{r['run_id']}.{f['photo']}.img" if len(photos) > 1 else f"photos/{r['run_id']}.img"
+                shutil.copy2(f["file"], dst / fn)
+                names.append((sides.get(f["photo"]), fn))
+            if len(names) == 1:
+                where = {"file": names[0][1]}
+            elif all(s for s, _ in names) and len({s for s, _ in names}) == len(names):
+                where = {"files": {s: fn for s, fn in names}}
+            else:
+                where = {"files": [fn for _, fn in names]}
             card = (r.get("result") or {}).get("card") or {}
             if rev["decision"] == "accept":
                 fields = {k: v.get("value") for k, v in ((r.get("result") or {}).get("fields") or {}).items()
                           if v.get("value") is not None}
                 fields.update(rev.get("fields") or {})
-                cases.append({"file": fn, "family": rev.get("family") or card.get("family"),
+                cases.append({**where, "family": rev.get("family") or card.get("family"),
                               "variant": rev.get("variant") or card.get("variant"),
                               "expected_status": "ACCEPT", "fields": fields, "run_id": r["run_id"]})
             else:
-                cases.append({"file": fn, "family": None, "variant": None, "expected_status": "REJECT",
+                cases.append({**where, "family": None, "variant": None, "expected_status": "REJECT",
                               "fields": {}, "run_id": r["run_id"]})
         if not cases:
             shutil.rmtree(dst, ignore_errors=True)

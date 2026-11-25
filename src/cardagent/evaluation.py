@@ -4,6 +4,9 @@ threshold or model change may ship. Used by POST /v1/evaluations and tools/evalu
 Manifest (manifest.json, a JSON list), paths relative to the manifest:
   {"file": "photos/IMG_0012.jpg", "family": "ae.fazaa", "variant": "gold",
    "expected_status": "ACCEPT", "fields": {"card_number": "2210457783"}}
+Two-sided cards: "files" instead of "file", either by side or as a list (sides detected):
+  {"files": {"front": "photos/0012_f.jpg", "back": "photos/0012_b.jpg"}, ...}
+  {"files": ["photos/0012_1.jpg", "photos/0012_2.jpg"], ...}
 family/variant null = a card that must not be identified (other programme, non-card).
 """
 from __future__ import annotations
@@ -30,17 +33,32 @@ def load_manifest(path: Path) -> list[dict]:
         raise ManifestError("manifest.json must be a non-empty JSON list")
     base = path.parent.resolve()
     for i, c in enumerate(cases):
-        if not isinstance(c, dict) or "file" not in c or "expected_status" not in c:
-            raise ManifestError(f"case {i}: needs at least 'file' and 'expected_status'")
+        if not isinstance(c, dict) or ("file" not in c and "files" not in c) or "expected_status" not in c:
+            raise ManifestError(f"case {i}: needs 'file' (or 'files') and 'expected_status'")
         if c["expected_status"] not in STATUSES:
             raise ManifestError(f"case {i}: expected_status must be one of {sorted(STATUSES)}")
-        f = (base / c["file"]).resolve()
-        if base not in f.parents or not f.is_file():
-            raise ManifestError(f"case {i}: image '{c['file']}' not found next to manifest.json")
+        c["photos"] = _case_photos(c, i)
+        for _, rel in c["photos"]:
+            f = (base / rel).resolve()
+            if base not in f.parents or not f.is_file():
+                raise ManifestError(f"case {i}: image '{rel}' not found next to manifest.json")
+        c.setdefault("file", c["photos"][0][1])
         c.setdefault("family", None)
         c.setdefault("variant", None)
         c.setdefault("fields", {})
     return cases
+
+
+def _case_photos(c: dict, i: int) -> list[tuple[str | None, str]]:
+    """[(declared side or None, relative path)] of a manifest case."""
+    if "files" not in c:
+        return [(None, c["file"])]
+    fs = c["files"]
+    if isinstance(fs, dict) and fs and set(fs) <= {"front", "back"}:
+        return [(s, fs[s]) for s in ("front", "back") if s in fs]
+    if isinstance(fs, list) and 1 <= len(fs) <= 2 and all(isinstance(x, str) for x in fs):
+        return [(None, x) for x in fs]
+    raise ManifestError(f"case {i}: 'files' must be {{\"front\": path, \"back\": path}} or a list of 1-2 paths")
 
 
 def evaluate(agent, cases: list[dict], base_dir: Path, today: date | None = None, settings=None,
@@ -51,10 +69,13 @@ def evaluate(agent, cases: list[dict], base_dir: Path, today: date | None = None
     field_tot, field_ok = Counter(), Counter()
     latencies = []
     for i, c in enumerate(cases):
-        r = agent.process((base_dir / c["file"]).read_bytes(), f"eval:{c['file']}", today, settings=settings)
+        from .agent import Photo
+        photos = [Photo((base_dir / rel).read_bytes(), side, side or ("image" if len(c["photos"]) == 1 else "images"))
+                  for side, rel in c.get("photos") or [(None, c["file"])]]
+        r = agent.process(request_id=f"eval:{c['file']}", today=today, settings=settings, photos=photos)
         card = r["card"] or {}
         pf, pv = card.get("family"), card.get("variant")
-        retake = "RETAKE_REQUIRED" in r["reasons"]
+        retake = "RETAKE_REQUIRED" in r["reasons"] or any(x.startswith("SIDE_REQUIRED") for x in r["reasons"])
         conf_family[str(c["family"])][str(pf)] += 1
         if c["family"] and not retake:
             conf_variant[f"{c['family']}/{c['variant']}"][f"{pf}/{pv}"] += 1
@@ -69,7 +90,8 @@ def evaluate(agent, cases: list[dict], base_dir: Path, today: date | None = None
                 field_tot[k] += 1
                 field_ok[k] += int(r["fields"][k]["value"] == v)
         latencies.append(r["processing_ms"])
-        rows.append({"file": c["file"], "expected": c["expected_status"], "got": r["status"],
+        rows.append({"file": c["file"], **({"files": c["files"]} if "files" in c else {}),
+                     "expected": c["expected_status"], "got": r["status"],
                      "expected_family": c["family"], "expected_variant": c["variant"], "family": pf, "variant": pv,
                      "id_correct": correct_id if c["family"] and not retake else None,
                      "reasons": r["reasons"], "ms": r["processing_ms"], "timings": r["timings_ms"]})

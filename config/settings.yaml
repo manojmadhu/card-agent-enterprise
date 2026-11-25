@@ -68,6 +68,7 @@ scoring:
   variant_margin: 0.08
   reject_below: 0.30               # family score below this = REJECT (unknown card), between = REVIEW
   geometry_required_without_text: 0.60   # no issuer text read -> accept only on strong design match
+  sides_mismatch_geometry: 0.30     # two photos strongly matching different cards -> SIDES_MISMATCH (REVIEW)
   field_min_confidence: 0.55
 
 quality:

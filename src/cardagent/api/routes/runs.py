@@ -3,7 +3,8 @@
 Every validation is stored as a run (payload-only point in <prefix>_runs, photo on disk under
 runs.store_dir) unless runs.enabled=false or the request passed ?store=false. REVIEW decisions enter
 the queue with review_status=pending; a reviewer settles them with POST /v1/runs/{id}/review and can
-enroll the photo as a new reference image so the same design is recognised next time.
+enroll the photos as new reference images (each as the side it shows) so the same design is
+recognised next time. A run keeps every uploaded photo (one, or front and back).
 """
 from __future__ import annotations
 
@@ -64,10 +65,14 @@ def get_run(run_id: str, a: CardAgent = Depends(agent)):
 
 
 @router.get("/runs/{run_id}/image")
-def run_image(run_id: str, a: CardAgent = Depends(agent)):
-    p = a.runs.image_file(_run_or_404(a, run_id))
+def run_image(run_id: str, side: Literal["front", "back"] | None = Query(None, description="the photo used as this side"),
+              photo: int | None = Query(None, ge=0, le=1, description="the photo at this upload position (0-based)"),
+              a: CardAgent = Depends(agent)):
+    """A stored photo of the run: by default the main one (front when present)."""
+    p = a.runs.image_file(_run_or_404(a, run_id), side=side, photo=photo)
     if p is None:
-        raise HTTPException(404, "no photo stored for this run (runs.store_images=false or pruned)")
+        raise HTTPException(404, "no such photo stored for this run (runs.store_images=false, pruned, or no photo "
+                                 "of that side/position)")
     with open(p, "rb") as fh:
         return FileResponse(p, media_type=image_media_type(fh.read(16)))
 
@@ -87,7 +92,11 @@ class ReviewIn(BaseModel):
     fields: dict[str, str] = Field(default_factory=dict, description="corrected field values, e.g. {\"card_number\": \"...\"}")
     note: str | None = None
     reviewer: str | None = None
-    enroll: bool = Field(False, description="accept only: add this photo as a reference image of family/variant")
+    enroll: bool = Field(False, description="accept only: add the run's photos as reference images of family/variant, "
+                                            "each as the side it shows")
+    photo_sides: dict[int, Literal["front", "back"]] = Field(
+        default_factory=dict, description="enroll: side of each photo by position, e.g. {\"0\": \"back\"}; "
+                                          "default the side the agent assigned")
 
 
 @router.post("/runs/{run_id}/review")
@@ -116,15 +125,30 @@ async def review_run(run_id: str, body: ReviewIn, a: CardAgent = Depends(agent))
               "variant": variant if body.decision == "accept" else None, "fields": body.fields,
               "note": body.note, "reviewer": body.reviewer, "reviewed_at": time.time(), "enrolled": None}
     if body.enroll:
-        p = a.runs.image_file(run)
-        if p is None:
+        files = a.runs.photo_files(run)
+        if not files:
             raise HTTPException(422, "this run has no stored photo to enroll")
-        try:
-            r = await run_in_threadpool(a.store.add_reference, fam, variant, p.read_bytes(), f"run-{run_id}.img", "api")
-        except ValueError as e:
-            raise HTTPException(422, f"photo could not be enrolled: {e}")
+        plan = []
+        for f in files:
+            side = body.photo_sides.get(f["photo"]) or f.get("side") or ("front" if len(files) == 1 else None)
+            if side is None:
+                continue                                             # photo was not used; side unknown
+            if side not in fam.side_ids:
+                raise HTTPException(422, f"photo {f['photo']}: {family} has no {side} side")
+            plan.append((f, side))
+        if not plan:
+            raise HTTPException(422, "no photo with a known side: send photo_sides, e.g. {\"0\": \"front\"}")
+        enrolled = []
+        for f, side in plan:
+            try:
+                r = await run_in_threadpool(a.store.add_reference, fam, variant, f["file"].read_bytes(),
+                                            f"run-{run_id}-{f['photo']}.img", "api", None, True, True, side)
+            except ValueError as e:
+                raise HTTPException(422, f"photo {f['photo']} could not be enrolled: {e}")
+            enrolled.append({"photo": f["photo"], "side": side, "ref_id": r["ref_id"], "status": r["status"]})
         a.refresh_if_changed(force=True)
-        review["enrolled"] = {"ref_id": r["ref_id"], "status": r["status"]}
+        review["enrolled"] = {"ref_id": enrolled[0]["ref_id"], "status": enrolled[0]["status"]}
+        review["enrolled_photos"] = enrolled
     out = a.runs.set_review(run_id, review)
     audit("review_run", run_id=run_id, decision=body.decision, family=family, variant=variant,
           enrolled=bool(review["enrolled"]))

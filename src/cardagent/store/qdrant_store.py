@@ -3,8 +3,10 @@
 Collections (prefix configurable, default "cardagent"):
   <prefix>_refs      one point per reference image
                      vector  = image embedding (cosine)
-                     payload = family, variant, variant_key, country, sha256, filename, image_path,
-                               colour, source, added_at, orb (base64 ORB keypoints, stored on disk)
+                     payload = family, variant, variant_key, side, side_key, country, sha256, filename,
+                               image_path, colour, source, added_at, orb (base64 ORB keypoints, on disk)
+                     side: the card side the image shows (front|back); points stored before card
+                     sides existed have no side and count as front
   <prefix>_families  no vectors: one point per card family (payload = validated definition)
                      + one "meta" point: revision, embedder name, vector dim
 
@@ -39,8 +41,9 @@ log = logging.getLogger(__name__)
 
 _NS = uuid.UUID("6f1c3f7e-2b7a-4c55-9d0e-6a1f2c9b8e01")
 META_ID = str(uuid.uuid5(_NS, "__meta__"))
-REF_PAYLOAD = ["family", "variant", "variant_key", "country", "sha256", "filename", "image_path",
+REF_PAYLOAD = ["family", "variant", "variant_key", "side", "country", "sha256", "filename", "image_path",
                "colour", "source", "added_at"]
+HIT_PAYLOAD = ["family", "variant", "side", "colour"]
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp"}
 
 
@@ -48,8 +51,16 @@ def family_point_id(family_id: str) -> str:
     return str(uuid.uuid5(_NS, f"family:{family_id}"))
 
 
-def ref_point_id(family_id: str, variant_id: str, sha256: str) -> str:
-    return str(uuid.uuid5(_NS, f"ref:{family_id}/{variant_id}/{sha256}"))
+def ref_point_id(family_id: str, variant_id: str, sha256: str, side: str = "front") -> str:
+    """Front ids keep the format from before card sides existed, so stored points stay valid."""
+    key = f"ref:{family_id}/{variant_id}/{sha256}" if side == "front" else f"ref:{family_id}/{variant_id}/{side}/{sha256}"
+    return str(uuid.uuid5(_NS, key))
+
+
+def _hit(p) -> RefHit:
+    pl = p.payload
+    return RefHit(str(p.id), pl["family"], pl["variant"], float(p.score), pl.get("side") or "front",
+                  tuple(pl["colour"]) if pl.get("colour") else None)
 
 
 def _now() -> str:
@@ -145,7 +156,11 @@ class QdrantCardStore:
             c.create_collection(self.refs_col,
                                 vectors_config=m.VectorParams(size=self.embedder.dim, distance=m.Distance.COSINE),
                                 on_disk_payload=True)       # ORB blobs stay on disk, not in RAM
-            self._index(self.refs_col, ["family", "variant_key", "source", "sha256"])
+            self._index(self.refs_col, ["family", "variant_key", "source", "sha256", "side_key"])
+        else:                                          # collections created before card sides existed
+            have = set((c.get_collection(self.refs_col).payload_schema or {}).keys())
+            if "side_key" not in have:
+                self._index(self.refs_col, ["side_key"])
         if not meta:
             self._write_meta(revision=uuid.uuid4().hex[:12])
 
@@ -194,7 +209,7 @@ class QdrantCardStore:
             except Exception as e:
                 log.error("skipping invalid family definition %s: %s", rec.payload.get("family_id"), e)
         counts = self.ref_counts()
-        return StoreSnapshot(version, families, KeywordIndex(families), self, counts)
+        return StoreSnapshot(version, families, KeywordIndex(families), self, counts, self.side_counts(counts))
 
     @_guard
     def ref_counts(self) -> dict[tuple[str, str], int]:
@@ -209,10 +224,27 @@ class QdrantCardStore:
         return out
 
     @_guard
+    def side_counts(self, totals: dict[tuple[str, str], int] | None = None) -> dict[tuple[str, str, str], int]:
+        """(family, variant, side) -> count. Non-front sides are counted from side_key; front is the
+        rest, which also covers references stored before card sides existed."""
+        totals = self.ref_counts() if totals is None else totals
+        if not totals:
+            return {}
+        res = self.client.facet(self.refs_col, "side_key", limit=max(1000, sum(totals.values())), exact=True)
+        out: dict[tuple[str, str, str], int] = {}
+        for h in res.hits:
+            fam, var, side = (str(h.value).split("/") + ["", ""])[:3]
+            if side and side != "front":
+                out[(fam, var, side)] = h.count
+        for (fam, var), n in totals.items():
+            out[(fam, var, "front")] = n - sum(c for (f, v, s), c in out.items() if f == fam and v == var and s != "front")
+        return out
+
+    @_guard
     def search(self, qvec: np.ndarray, k: int) -> list[RefHit]:
         r = self.client.query_points(self.refs_col, query=qvec.astype(np.float32).tolist(), limit=k,
-                                     with_payload=["family", "variant"])
-        return [RefHit(str(p.id), p.payload["family"], p.payload["variant"], float(p.score)) for p in r.points]
+                                     with_payload=HIT_PAYLOAD)
+        return [_hit(p) for p in r.points]
 
     @_guard
     def family_refs(self, qvec: np.ndarray, family_ids: set[str], limit: int) -> list[RefHit]:
@@ -220,8 +252,8 @@ class QdrantCardStore:
             return []
         flt = self.m.Filter(must=[self.m.FieldCondition(key="family", match=self.m.MatchAny(any=sorted(family_ids)))])
         r = self.client.query_points(self.refs_col, query=qvec.astype(np.float32).tolist(), query_filter=flt,
-                                     limit=limit, with_payload=["family", "variant"])
-        return [RefHit(str(p.id), p.payload["family"], p.payload["variant"], float(p.score)) for p in r.points]
+                                     limit=limit, with_payload=HIT_PAYLOAD)
+        return [_hit(p) for p in r.points]
 
     @_guard
     def keypoints(self, ref_ids: list[str]) -> dict[str, Keypoints]:
@@ -243,7 +275,8 @@ class QdrantCardStore:
     @_guard
     def list_refs(self, family_id: str | None = None) -> list[dict]:
         flt = self._eq("family", family_id) if family_id else None
-        return [{"ref_id": str(r.id), **r.payload} for r in self._scroll(self.refs_col, flt, REF_PAYLOAD)]
+        return [{"ref_id": str(r.id), **r.payload, "side": r.payload.get("side") or "front"}
+                for r in self._scroll(self.refs_col, flt, REF_PAYLOAD)]
 
     @_guard
     def put_family(self, fam: CardFamily, source: str, bump: bool = True) -> dict:
@@ -265,6 +298,10 @@ class QdrantCardStore:
                 removed = {v.id for v in old_fam.variants} - {v.id for v in fam.variants}
                 for vid in removed:
                     out["references_deleted"] += self._delete_refs(self._eq("variant_key", f"{fam.id}/{vid}"))
+                gone_sides = set(old_fam.side_ids) - set(fam.side_ids)      # e.g. the back side was removed
+                if gone_sides:
+                    ids = [r["ref_id"] for r in self.list_refs(fam.id) if r["side"] in gone_sides]
+                    out["references_deleted"] += self.delete_refs_by_ids(ids)
                 if old.get("rois") != rois_signature(fam):
                     out["keypoints_refreshed"] = self._refresh_keypoints(fam)
                 if old_fam.country != fam.country:
@@ -292,17 +329,20 @@ class QdrantCardStore:
     # ================================================================ admin: references
     @_guard
     def add_reference(self, fam: CardFamily, variant_id: str, data: bytes, filename: str, source: str,
-                      image_path: Path | None = None, detect_card: bool = True, bump: bool = True) -> dict:
-        """Embed one reference image and upsert it. Idempotent: the same image bytes for the same
-        variant map to the same point id. Uploaded images are kept in reference_store_dir so the
-        family can be re-processed later (new embedder, changed ROIs) without asking for them again."""
+                      image_path: Path | None = None, detect_card: bool = True, bump: bool = True,
+                      side: str = "front") -> dict:
+        """Embed one reference image of one card side and upsert it. Idempotent: the same image bytes
+        for the same variant and side map to the same point id. Uploaded images are kept in
+        reference_store_dir so the family can be re-processed later (new embedder, changed ROIs)."""
         if fam.variant(variant_id) is None:
             raise KeyError(f"variant '{variant_id}' not in family {fam.id}")
+        if side not in fam.side_ids:
+            raise KeyError(f"side '{side}' not in family {fam.id} (sides: {', '.join(fam.side_ids)})")
         sha = _sha256(data)
-        pid = ref_point_id(fam.id, variant_id, sha)
+        pid = ref_point_id(fam.id, variant_id, sha, side)
         with self._write_lock:
             if self.client.retrieve(self.refs_col, [pid], with_payload=False):
-                return {"ref_id": pid, "status": "exists", "sha256": sha}
+                return {"ref_id": pid, "status": "exists", "sha256": sha, "side": side}
             img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
             if img is None:
                 raise ValueError(f"{filename}: not a decodable image")
@@ -312,20 +352,22 @@ class QdrantCardStore:
                 detected = info["card_detected"]
             if image_path is None:
                 ext = Path(filename).suffix.lower() if Path(filename).suffix.lower() in IMAGE_EXT else ".png"
-                image_path = self.blob_dir / fam.id / variant_id / f"{sha[:24]}{ext}"
+                sub = self.blob_dir / fam.id / variant_id
+                image_path = (sub if side == "front" else sub / side) / f"{sha[:24]}{ext}"
                 image_path.parent.mkdir(parents=True, exist_ok=True)
                 image_path.write_bytes(data)
-            prep = prepare_reference(img, fam, self.embedder, self.n_features)
+            prep = prepare_reference(img, fam, self.embedder, self.n_features, side)
             self.client.upsert(self.refs_col, [self._ref_point(pid, fam, variant_id, sha, filename,
-                                                               image_path, source, prep)])
+                                                               image_path, source, prep, side)])
             if bump:
                 self.bump_revision()
-            return {"ref_id": pid, "status": "created", "sha256": sha, "card_detected": detected}
+            return {"ref_id": pid, "status": "created", "sha256": sha, "side": side, "card_detected": detected}
 
     @_guard
-    def add_prepared(self, items: list[tuple[str, CardFamily, str, str, str, Path, str, PreparedRef]]):
-        """Batch upsert of already-prepared references (used by registry sync)."""
-        pts = [self._ref_point(pid, fam, vid, sha, fn, path, src, prep) for pid, fam, vid, sha, fn, path, src, prep in items]
+    def add_prepared(self, items: list[tuple]):
+        """Batch upsert of already-prepared references (used by registry sync):
+        (pid, fam, variant, sha, filename, path, source, prepared[, side])."""
+        pts = [self._ref_point(*it) for it in items]
         for i in range(0, len(pts), 64):
             self.client.upsert(self.refs_col, pts[i:i + 64])
 
@@ -341,7 +383,8 @@ class QdrantCardStore:
             files = self._delete_blobs([ref])
             if bump:
                 self.bump_revision()
-            return {"ref_id": ref_id, "family": family_id, "variant": ref["variant"], "stored_images_deleted": files}
+            return {"ref_id": ref_id, "family": family_id, "variant": ref["variant"], "side": ref.get("side") or "front",
+                    "stored_images_deleted": files}
 
     @_guard
     def delete_refs_by_ids(self, ids: list[str]) -> int:
@@ -364,9 +407,11 @@ class QdrantCardStore:
             return old
 
     # ================================================================ helpers
-    def _ref_point(self, pid, fam: CardFamily, vid, sha, filename, image_path: Path, source, prep: PreparedRef):
+    def _ref_point(self, pid, fam: CardFamily, vid, sha, filename, image_path: Path, source, prep: PreparedRef,
+                   side: str = "front"):
         return self.m.PointStruct(id=pid, vector=prep.vector.astype(np.float32).tolist(), payload={
-            "family": fam.id, "variant": vid, "variant_key": f"{fam.id}/{vid}", "country": fam.country,
+            "family": fam.id, "variant": vid, "variant_key": f"{fam.id}/{vid}", "side": side,
+            "side_key": f"{fam.id}/{vid}/{side}", "country": fam.country,
             "sha256": sha, "filename": filename, "image_path": self._rel(image_path), "colour": list(prep.colour),
             "source": source, "added_at": _now(), "orb": keypoints_to_b64(prep.keypoints)})
 
@@ -424,7 +469,7 @@ class QdrantCardStore:
                 continue
             if ref.get("source") == "api":
                 img, _ = normalise_mod.normalise(img)
-            kp = reference_keypoints(img, fam, self.n_features)
+            kp = reference_keypoints(img, fam, self.n_features, ref["side"])
             self.client.set_payload(self.refs_col, {"orb": keypoints_to_b64(kp)}, points=[ref["ref_id"]])
             self._kp.drop([ref["ref_id"]])
             n += 1

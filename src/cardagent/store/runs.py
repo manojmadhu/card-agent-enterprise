@@ -2,8 +2,9 @@
 
 One point per validation. The payload keeps the full result JSON plus indexed fields for
 filtering (status, family, review_status) and time (created_at, epoch seconds). The uploaded
-photo is kept on disk (runs.store_dir) when runs.store_images is on, so a REVIEW case can be
-inspected and, once confirmed, enrolled as a reference image.
+photos (one, or one per card side) are kept on disk (runs.store_dir) when runs.store_images is on,
+so a REVIEW case can be inspected and, once confirmed, enrolled as reference images.
+Payload `images`: [{photo, side, upload, path}]; `image_path` is the main photo (front when present).
 
 Runs contain personal data (names, card and Emirates ID numbers): the API serves them only with
 the admin token, and runs older than runs.retention_days are deleted with their photos.
@@ -23,7 +24,7 @@ from .qdrant_store import _guard
 log = logging.getLogger(__name__)
 LIST_FIELDS = ["run_id", "request_id", "created_at", "created_iso", "status", "reasons", "family", "variant",
                "family_confidence", "variant_confidence", "processing_ms", "source", "review_status",
-               "has_image", "registry_version"]
+               "has_image", "photos", "registry_version"]
 
 
 def _iso(ts: float) -> str:
@@ -65,16 +66,28 @@ class RunStore:
 
     # ------------------------------------------------------------------ write
     @_guard
-    def add(self, result: dict, image: bytes | None, source: str) -> str:
+    def add(self, result: dict, photos, source: str) -> str:
+        """photos: the uploaded photos (agent.Photo list), or raw bytes of a single photo."""
         run_id = uuid.uuid4().hex
         now = time.time()
-        image_path = None
-        if image is not None and self.cfg.store_images:
+        if isinstance(photos, (bytes, bytearray)) or photos is None:
+            from ..agent import Photo
+            photos = [] if photos is None else [Photo(bytes(photos), None, "image")]
+        info = {p["photo"]: p for p in result.get("photos") or []}
+        images = []
+        if self.cfg.store_images:
             day = datetime.fromtimestamp(now, timezone.utc)
-            p = self.dir / f"{day:%Y}" / f"{day:%m}" / f"{run_id}.img"
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(image)
-            image_path = p.relative_to(self.dir).as_posix()
+            for i, ph in enumerate(photos):
+                if not ph.data:
+                    continue
+                name = f"{run_id}.img" if i == 0 else f"{run_id}.{i}.img"
+                p = self.dir / f"{day:%Y}" / f"{day:%m}" / name
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(ph.data)
+                images.append({"photo": i, "side": (info.get(i) or {}).get("side"), "upload": ph.upload,
+                               "path": p.relative_to(self.dir).as_posix()})
+        main = next((im for im in images if im["side"] == "front"), images[0] if images else None)
+        image_path = main["path"] if main else None
         card = result.get("card") or {}
         payload = {
             "kind": "run", "run_id": run_id, "request_id": result.get("request_id"),
@@ -85,7 +98,8 @@ class RunStore:
             "processing_ms": result.get("processing_ms"),
             "registry_version": (result.get("model_versions") or {}).get("registry"),
             "review_status": "pending" if result["status"] == "REVIEW" else "none", "review": None,
-            "has_image": image_path is not None, "image_path": image_path, "result": result,
+            "has_image": image_path is not None, "image_path": image_path, "images": images,
+            "photos": len(photos), "result": result,
         }
         self.client.upsert(self.col, [self.m.PointStruct(id=run_id, vector={}, payload=payload)])
         return run_id
@@ -104,7 +118,8 @@ class RunStore:
         run = self.get(run_id)
         if run is None:
             return False
-        self._unlink(run.get("image_path"))
+        for rel in self._paths(run):
+            self._unlink(rel)
         self.client.delete(self.col, points_selector=self.m.PointIdsList(points=[run_id]))
         return True
 
@@ -117,11 +132,12 @@ class RunStore:
         flt = self._filter(until=cutoff)
         n = 0
         while True:
-            pts, _ = self.client.scroll(self.col, scroll_filter=flt, limit=500, with_payload=["image_path"])
+            pts, _ = self.client.scroll(self.col, scroll_filter=flt, limit=500, with_payload=["image_path", "images"])
             if not pts:
                 break
             for p in pts:
-                self._unlink(p.payload.get("image_path"))
+                for rel in self._paths(p.payload):
+                    self._unlink(rel)
             self.client.delete(self.col, points_selector=self.m.PointIdsList(points=[p.id for p in pts]))
             n += len(pts)
         if n:
@@ -137,11 +153,31 @@ class RunStore:
             return None
         return dict(r[0].payload) if r else None
 
-    def image_file(self, run: dict) -> Path | None:
-        if not run.get("image_path"):
+    def image_file(self, run: dict, side: str | None = None, photo: int | None = None) -> Path | None:
+        """The main photo, or the photo used as `side`, or photo number `photo` (0-based)."""
+        rel = run.get("image_path")
+        if (side is not None or photo is not None) and run.get("images"):
+            im = next((x for x in run["images"]
+                       if (side is None or x.get("side") == side) and (photo is None or x.get("photo") == photo)), None)
+            rel = im["path"] if im else None
+        elif side not in (None, "front") or photo not in (None, 0):
+            rel = None                          # runs stored before card sides existed: one (front) photo
+        if not rel:
             return None
-        p = (self.dir / run["image_path"]).resolve()
+        p = (self.dir / rel).resolve()
         return p if self.dir.resolve() in p.parents and p.exists() else None
+
+    def photo_files(self, run: dict) -> list[dict]:
+        """[{photo, side, upload, file}] of every stored photo of a run (runs from before card sides
+        existed: the single photo)."""
+        ims = run.get("images") or ([{"photo": 0, "side": None, "upload": "image", "path": run["image_path"]}]
+                                    if run.get("image_path") else [])
+        out = []
+        for im in ims:
+            p = (self.dir / im["path"]).resolve()
+            if self.dir.resolve() in p.parents and p.exists():
+                out.append({**{k: v for k, v in im.items() if k != "path"}, "file": p})
+        return out
 
     @_guard
     def list(self, status=None, family=None, review_status=None, since=None, until=None, before=None,
@@ -183,6 +219,10 @@ class RunStore:
                 rng["lt" if strict_until else "lte"] = until
             must.append(m.FieldCondition(key="created_at", range=m.Range(**rng)))
         return m.Filter(must=must) if must else None
+
+    @staticmethod
+    def _paths(run: dict) -> list[str]:
+        return list(dict.fromkeys([x["path"] for x in run.get("images") or []] + [run.get("image_path")]))
 
     def _unlink(self, rel: str | None):
         if not rel:

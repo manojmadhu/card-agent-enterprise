@@ -23,9 +23,17 @@ image ─► [1] quality gate ─► [2] detect + warp card ─► [3] full-card
  [6] EXTRACT fields: region OCR → regex  |  full-text regex  |  self-hosted VLM (re-validated)
  [7] RULES (card definition): regex, not_expired, date_order, emirates_id_format, luhn, length,
      prefix_matches_variant, lookup
- [8] DECIDE: ACCEPT / REVIEW / REJECT + reason codes → JSON (schema 2.0) + run record (Qdrant) + audit log + metrics
+ [8] DECIDE: ACCEPT / REVIEW / REJECT + reason codes → JSON (schema 2.1) + run record (Qdrant) + audit log + metrics
      REVIEW → human review queue → accept/reject (+ enroll photo as reference) → evaluation sets
 ```
+
+### Two-sided cards
+A request carries one card as 1–2 photos (front/back, or unlabelled). Stages 1–4a run per photo;
+identification pools the OCR text of both photos and takes the best visual evidence of either; each
+photo is assigned the side it matches (references are stored per side; labels are trusted unless the
+geometry clearly says otherwise); stage 5–6 align each photo to a reference of its side and read only
+that side's fields. A required side without a usable photo → `REJECT SIDE_REQUIRED:<side>`; photos of
+two different cards → `REVIEW SIDES_MISMATCH`. Full specification: [TWO_SIDED_CARDS.md](TWO_SIDED_CARDS.md).
 
 ### Design choices that matter
 | Decision | Why |

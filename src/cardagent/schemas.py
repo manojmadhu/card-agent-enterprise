@@ -6,8 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-SCHEMA_VERSION = "2.0"
+SCHEMA_VERSION = "2.1"          # 2.1: two-sided cards (photos, missing_sides, field side); additive to 2.0
 Status = Literal["ACCEPT", "REVIEW", "REJECT"]
+Side = Literal["front", "back"]
 
 
 class CardInfo(BaseModel):
@@ -27,6 +28,7 @@ class FieldResult(BaseModel):
     source: Literal["ocr_roi", "ocr_fulltext", "vlm", "none"]
     valid_format: bool
     valid_until: str | None = None    # ISO date, expiry fields only
+    side: Side = "front"               # card side the field is printed on
 
 
 class RuleResult(BaseModel):
@@ -57,6 +59,20 @@ class QualityInfo(BaseModel):
     aligned_to_reference: bool | None = None
 
 
+class PhotoInfo(BaseModel):
+    """One uploaded photo and what it was used for."""
+    photo: int                         # 0-based position in the request
+    upload: str                        # form field it came in: image | front | back | images
+    declared: Side | None = None       # side named by the upload field (front/back), else null
+    side: Side | None = None           # side this photo was used as; null = not used
+    status: Literal["used", "not_used", "retake", "invalid"]
+    side_corrected: bool = False       # the photo shows the other side than declared (uploads swapped)
+    quality: QualityInfo | None = None
+    reference_id: str | None = None    # reference image it was aligned to
+    inliers: int | None = None         # RANSAC inliers against that reference
+    fields: list[str] = []             # fields read from this photo
+
+
 class ValidationResult(BaseModel):
     schema_version: str = SCHEMA_VERSION
     request_id: str
@@ -66,7 +82,9 @@ class ValidationResult(BaseModel):
     card: CardInfo | None = None
     fields: dict[str, FieldResult] = {}
     validation: list[RuleResult] = []
-    quality: QualityInfo | None = None
+    quality: QualityInfo | None = None   # of the main photo (front when present); every photo: `photos`
+    photos: list[PhotoInfo] = []
+    missing_sides: list[Side] = []       # sides the card needs but no usable photo shows
     candidates: dict[str, list[Candidate]] = {}
     model_versions: dict[str, str] = {}
     timings_ms: dict[str, int] = {}

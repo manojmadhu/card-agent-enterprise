@@ -1,7 +1,8 @@
 """Validate the file registry and import it into Qdrant (CI / deploy step).
 
 Git-managed cards live in registry/cards/<country>/<family>.yaml with reference images in
-registry/refs/<family_id>/<variant_id>/*.png|jpg. Cards can also be managed entirely through the API
+registry/refs/<family_id>/<variant_id>/*.png|jpg (back side: <variant_id>/back/*.png). Cards can
+also be managed entirely through the API
 (PUT /v1/cards/{id} + reference uploads); then this tool is not needed. The sync is incremental:
 only new, changed or removed files are processed, and API-owned cards are never touched.
 
@@ -36,10 +37,11 @@ def main():
     s = get_settings()
     reg = s.path(s.registry_dir)
     snap = load_registry(reg)                                  # raises on any invalid YAML
-    missing = [f"{f.id}/{v.id}" for f in snap.families.values() for v in f.variants
-               if not any(r.family_id == f.id and r.variant_id == v.id for r in snap.refs)]
+    missing = [f"{f.id}/{v.id}" + ("" if s == "front" else f" ({s})") for f in snap.families.values()
+               for v in f.variants for s in f.side_ids
+               if not any(r.family_id == f.id and r.variant_id == v.id and r.side == s for r in snap.refs)]
     if missing and not a.allow_missing_refs:
-        print("ERROR: variants without reference images (add them to registry/refs or upload them "
+        print("ERROR: variants/sides without reference images (add them to registry/refs or upload them "
               "through the API and pass --allow-missing-refs):", ", ".join(missing))
         sys.exit(2)
     if a.validate_only:

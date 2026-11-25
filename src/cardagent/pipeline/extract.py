@@ -64,9 +64,11 @@ def normalise_value(raw: str, kind: str, anchor: str | None) -> str:
 
 
 def extract_fields(fam: CardFamily, img: np.ndarray, full_ocr: dict, ocr: OcrEngine,
-                   vlm: VlmClient | None) -> dict:
+                   vlm: VlmClient | None, side: str | None = None) -> dict:
+    """side: read only the fields printed on that side (img is a photo of that side, aligned to a
+    reference of that side). None = every field (cards defined with one side)."""
     out = {}
-    for f in fam.fields:
+    for f in (fam.fields if side is None else fam.fields_on(side)):
         rx = re.compile(f.regex)
         x0, y0, x1, y1 = f.roi
         pad = 0.01
@@ -75,7 +77,8 @@ def extract_fields(fam: CardFamily, img: np.ndarray, full_ocr: dict, ocr: OcrEng
         raw, conf = ocr.read_line(crop, f.script)
         val = normalise_value(raw, f.normalise, f.anchor)
         r = {"value": val or None, "confidence": round(conf, 3), "source": "ocr_roi",
-             "valid_format": bool(val and rx.fullmatch(val)), "required": f.required}
+             "valid_format": bool(val and rx.fullmatch(val)), "required": f.required, "side": f.side,
+             "captured": True}
 
         if not r["valid_format"] and f.normalise in FULLTEXT_PATTERNS:
             for m in re.finditer(FULLTEXT_PATTERNS[f.normalise], full_ocr["text"]):
@@ -94,3 +97,9 @@ def extract_fields(fam: CardFamily, img: np.ndarray, full_ocr: dict, ocr: OcrEng
             r["source"] = "none"
         out[f.name] = r
     return out
+
+
+def not_captured(f) -> dict:
+    """A field printed on a side no usable photo shows."""
+    return {"value": None, "confidence": 0.0, "source": "none", "valid_format": False, "required": f.required,
+            "side": f.side, "captured": False}

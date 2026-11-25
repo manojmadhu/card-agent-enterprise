@@ -8,11 +8,13 @@ fields, validates them, and returns a strict JSON decision: `ACCEPT` / `REVIEW` 
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Deployment, GPU sizing (NVIDIA T4), card onboarding, runbook: [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - Windows step by step: [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md)
+- Cards with data on both sides (design + client/web-console specification): [docs/TWO_SIDED_CARDS.md](docs/TWO_SIDED_CARDS.md)
 
 ## What the platform does
 | Feature | Endpoints |
 |---|---|
 | Validate a card photo, plain or as a live step-by-step stream (SSE) | `POST /v1/cards/validate`, `POST /v1/cards/validate/stream` |
+| Cards with data on both sides: one request with a front and a back photo (or 2 unlabelled photos) | same endpoints, fields `front` / `back` / `images` |
 | Manage card programmes, variants, fields, rules and reference images | `/v1/cards…` |
 | Import Git-managed cards from `registry/` (optional) | `POST /v1/registry/sync` |
 | Run history, human review queue, enroll reviewed photos as references | `/v1/runs…`, `/v1/review` |
@@ -22,7 +24,8 @@ fields, validates them, and returns a strict JSON decision: `ACCEPT` / `REVIEW` 
 | Health and Prometheus metrics | `/health/live`, `/health/ready`, `/metrics` |
 
 The platform **starts empty**: no demo cards. Add your programmes through the API (or `registry/`),
-upload a few reference images per variant, and it is ready. `examples/cards/` has templates.
+upload a few reference images per variant (and per side for two-sided cards), and it is ready.
+`examples/cards/` has templates, including `two_sided/`.
 
 ## Run on a local PC
 **You need:** Python 3.10–3.12 (64-bit), Git, Tesseract OCR with English + Arabic data, Docker (for Qdrant).
@@ -66,6 +69,7 @@ curl -X PUT -H "$H" -H "Content-Type: application/yaml" --data-binary @examples/
 curl -X POST -H "$H" -F images=@gold_ref1.jpg -F images=@gold_ref2.jpg \
      http://127.0.0.1:8080/v1/cards/ae.fazaa/variants/gold/references
 curl -F image=@photo.jpg -F request_id=t1 http://127.0.0.1:8080/v1/cards/validate
+curl -F front=@front.jpg -F back=@back.jpg http://127.0.0.1:8080/v1/cards/validate   # two-sided cards
 curl -N -F image=@photo.jpg http://127.0.0.1:8080/v1/cards/validate/stream
 ```
 Repeat the reference upload for every variant (3–20 clean images each). Then measure accuracy with an
@@ -84,7 +88,8 @@ behind its nginx image (same origin). The stream format is in `docs/API.md` §1.
 python -m pytest -q
 ```
 Self-contained: an in-process Qdrant, the built-in matcher and test cards drawn in code — no server,
-no model, no sample files. Needs Tesseract. 47 tests covering the rules, settings, CORS and every API group.
+no model, no sample files. Needs Tesseract. 74 tests covering the rules, settings, CORS, two-sided cards
+and every API group.
 Against a Qdrant server instead: `CARDAGENT_TEST_QDRANT_URL=http://127.0.0.1:6333 python -m pytest -q`.
 
 ## Project layout

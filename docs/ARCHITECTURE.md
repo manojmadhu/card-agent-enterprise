@@ -54,12 +54,12 @@ can share one Qdrant and stay consistent. Collections (prefix `qdrant.collection
 
 | Collection | Points |
 |---|---|
-| `_refs` | one per reference image: cosine vector + payload `family`, `variant`, `country`, `sha256`, `source`, ORB keypoints |
+| `_refs` | one per reference image: cosine vector + payload `family`, `variant`, `side` (front/back), `country`, `sha256`, `source`, ORB keypoints |
 | `_families` | card definitions (validated JSON), a `meta` point (revision, embedder, vector size) and the runtime settings overrides |
 | `_runs` | every validation (payload only): decision summary, full response, review; photo on disk (`runs.store_dir`) |
 | `_evaluations` | evaluation sets and evaluations; zips and reports on disk (`evaluation.store_dir`) |
 
-* **Point ids are content addressed**: `uuid5(family/variant/sha256(image))`. Re-adding an image is a no-op; an image never gets two vectors.
+* **Point ids are content addressed**: `uuid5(family/variant/sha256(image))` (back side: `family/variant/back/sha256`). Re-adding an image is a no-op; an image never gets two vectors.
 * **Changes touch only the affected card**: add/replace/delete a family or a reference image in seconds, no re-index. Each write bumps the store revision; every replica checks it every `qdrant.refresh_seconds` and reloads (cards + settings) when it changed.
 * **Ownership**: every family has `source = api | registry`. Cards are normally managed through the API. Optionally, Git-managed files in `registry/` are imported incrementally (`POST /v1/registry/sync`, `tools/sync_registry.py`); a sync never modifies or prunes API-owned cards, and the API refuses (409) to change registry-owned cards unless `?force=true`.
 * **ROI changes** re-extract keypoints for that family only (personal-data regions are masked out of reference keypoints); vectors are untouched. **Embedder changes** require a re-embed (`tools/sync_registry.py --reembed`): the service refuses to start on a mismatch. Uploaded reference images are kept in `qdrant.reference_store_dir` for that purpose.
@@ -86,13 +86,15 @@ for the next threshold or card change.
 ## 5. Output contract (excerpt)
 ```json
 {
-  "schema_version": "2.0", "request_id": "abc", "run_id": "5c0f…", "status": "ACCEPT", "reasons": [],
+  "schema_version": "2.1", "request_id": "abc", "run_id": "5c0f…", "status": "ACCEPT", "reasons": [],
   "card": {"family": "ae.fazaa", "family_name": "Fazaa", "country": "AE", "issuer": "Fazaa",
            "family_confidence": 0.93, "variant": "gold", "variant_name": "Fazaa Gold", "variant_confidence": 0.88},
   "fields": {"card_number": {"value": "2210457783", "confidence": 0.95, "source": "ocr_roi", "valid_format": true},
              "expiry_date": {"value": "11/27", "valid_until": "2027-11-30", "confidence": 0.95, "source": "ocr_roi", "valid_format": true}},
   "validation": [{"rule": "not_expired", "field": "expiry_date", "critical": true, "result": "pass", "detail": "valid_until=2027-11-30"}],
   "quality": {"passed": true, "card_detected": true, "rotation": 0, "aligned_to_reference": true, "...": "..."},
+  "photos": [{"photo": 0, "upload": "image", "side": "front", "status": "used", "fields": ["card_number", "expiry_date"], "...": "..."}],
+  "missing_sides": [],
   "candidates": {"family": [{"id": "ae.fazaa", "score": 0.93, "signals": {"text": 1.0, "embed": 0.7, "geometry": 1.0, "colour": 0.9}}]},
   "model_versions": {"pipeline": "1.0.0", "registry": "…", "embedder": "…", "ocr": "…"},
   "timings_ms": {"quality": 5, "normalise": 18, "ocr_full": 397, "features": 15, "identify": 208, "extract": 558},

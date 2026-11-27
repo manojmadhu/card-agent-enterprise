@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1130" viewBox="0 0 1500 1130" role="img" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title>Card Validation Agent — architecture</title><desc>Components of the offline card validation agent inside a private network with a T4 GPU host.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9z" fill="#55554F"/></marker></defs>
+<rect width="1500" height="1130" fill="#FFFFFF"/>
+<text x="40" y="30" font-size="22" font-weight="700" fill="#1F1F1D" text-anchor="start" dominant-baseline="central">Card Validation Agent — system architecture</text>
+<text x="40" y="56" font-size="13.5" font-weight="400" fill="#6B6B66" text-anchor="start" dominant-baseline="central">All models self-hosted · no public AI APIs · containers on an internal network with no internet route</text>
+<rect x="290" y="84" width="1180" height="860" rx="18" fill="none" stroke="#9A9A94" stroke-width="1.4" stroke-dasharray="8 6"/>
+<text x="310" y="106" font-size="13" font-weight="600" fill="#6B6B66" text-anchor="start" dominant-baseline="central">Private network  (on-prem / private cloud)  ·  docker network internal: true</text>
+<rect x="40" y="250" width="200" height="110" rx="10" fill="#F4F4F2" stroke="#8A8A84" stroke-width="1.4"/>
+<text x="140.0" y="286.875" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">Capture system</text>
+<text x="140.0" y="308.625" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">POS · kiosk · mobile app</text>
+<text x="140.0" y="326.75" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">1–2 photos: front / back</text>
+<rect x="40" y="410" width="200" height="150" rx="10" fill="#FFF0E3" stroke="#D9772B" stroke-width="1.4"/>
+<text x="140.0" y="448.75" font-size="15" font-weight="600" fill="#7A3E10" text-anchor="middle" dominant-baseline="central">Web console</text>
+<text x="140.0" y="470.5" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">card-agent-web (React)</text>
+<text x="140.0" y="488.625" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">cards · references</text>
+<text x="140.0" y="506.75" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">review queue · runs</text>
+<text x="140.0" y="524.875" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">settings · evaluations</text>
+<rect x="40" y="610" width="200" height="100" rx="10" fill="#F4F4F2" stroke="#8A8A84" stroke-width="1.4"/>
+<text x="140.0" y="650.9375" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">Storage system</text>
+<text x="140.0" y="672.6875" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">stores the result JSON</text>
+<rect x="320" y="300" width="190" height="220" rx="10" fill="#F6F6F4" stroke="#7A7A74" stroke-width="1.4"/>
+<text x="415.0" y="364.6875" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">API gateway / nginx</text>
+<text x="415.0" y="386.4375" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">mTLS · auth</text>
+<text x="415.0" y="404.5625" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">rate limit · WAF</text>
+<text x="415.0" y="422.6875" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">same-origin proxy</text>
+<text x="415.0" y="440.8125" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">for the console</text>
+<text x="415.0" y="458.9375" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">(or api.cors_origins)</text>
+<rect x="550" y="130" width="560" height="610" rx="16" fill="#FAF9FF" stroke="#6A5ACD" stroke-width="1.4"/>
+<text x="570" y="152" font-size="14.5" font-weight="700" fill="#2E2570" text-anchor="start" dominant-baseline="central">cardagent container  (FastAPI · uvicorn 2 workers · read-only FS)</text>
+<rect x="575" y="172" width="510" height="112" rx="10" fill="#F1EFFD" stroke="#6A5ACD" stroke-width="1.4"/>
+<text x="830.0" y="193.2" font-size="15" font-weight="600" fill="#2E2570" text-anchor="middle" dominant-baseline="central">API layer  (/v1)</text>
+<text x="830.0" y="214.95" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">POST /cards/validate  (+ /validate/stream, SSE)  ·  /cards  ·  /registry</text>
+<text x="830.0" y="232.35" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">/runs  ·  /review  ·  /evaluations  ·  /settings  ·  /stats</text>
+<text x="830.0" y="249.75" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">/health/live  ·  /health/ready  ·  /metrics</text>
+<text x="830.0" y="267.15" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">admin routes require X-Admin-Token</text>
+<rect x="575" y="300" width="510" height="214" rx="10" fill="#F1EFFD" stroke="#6A5ACD" stroke-width="1.4"/>
+<text x="830" y="320" font-size="15" font-weight="600" fill="#2E2570" text-anchor="middle" dominant-baseline="central">Pipeline engine  (1–2 photos per request)</text>
+<rect x="590" y="340" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="646.0" y="367.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Quality gate</text>
+<text x="646.0" y="385.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">per photo</text>
+<rect x="714" y="340" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="770.0" y="367.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Normalise</text>
+<text x="770.0" y="385.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">detect + warp</text>
+<rect x="838" y="340" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="894.0" y="367.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">OCR</text>
+<text x="894.0" y="385.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">PaddleOCR 0°/180°</text>
+<rect x="962" y="340" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="1018.0" y="367.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Identify</text>
+<text x="1018.0" y="385.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">2-stage · fused</text>
+<rect x="590" y="424" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="646.0" y="451.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Sides</text>
+<text x="646.0" y="469.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">assign front/back</text>
+<rect x="714" y="424" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="770.0" y="451.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Align</text>
+<text x="770.0" y="469.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">per side</text>
+<rect x="838" y="424" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="894.0" y="451.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Extract</text>
+<text x="894.0" y="469.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">ROI · regex · VLM</text>
+<rect x="962" y="424" width="112" height="70" rx="8" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="1018.0" y="451.02500000000003" font-size="13" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Rules → Decide</text>
+<text x="1018.0" y="469.87500000000006" font-size="11" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">card definition</text>
+<path d="M703 375 L713 375" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M703 459 L713 459" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M827 375 L837 375" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M827 459 L837 459" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M951 375 L961 375" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M951 459 L961 459" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M1018 410 L1018 414 L646 414 L646 422" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="575" y="532" width="510" height="188" rx="10" fill="#F1EFFD" stroke="#6A5ACD" stroke-width="1.4"/>
+<text x="830.0" y="582.5" font-size="14" font-weight="600" fill="#2E2570" text-anchor="middle" dominant-baseline="central">Engine state  (in memory, per worker)</text>
+<text x="830.0" y="602.8" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">Snapshot of card definitions, references and settings overrides</text>
+<text x="830.0" y="620.1999999999999" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">refreshed from Qdrant every 5 s — no restart, no reload call</text>
+<text x="830.0" y="637.5999999999999" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">Keyword inverted index (EN + AR, OCR-confusable characters)</text>
+<text x="830.0" y="654.9999999999999" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">Reference keypoints for stage-2 verification</text>
+<text x="830.0" y="672.3999999999999" font-size="12" font-weight="400" fill="#686298" text-anchor="middle" dominant-baseline="central">Idempotency cache (2 000 results)  ·  in-flight requests keep their snapshot</text>
+<rect x="1150" y="130" width="290" height="440" rx="16" fill="#F3FBF8" stroke="#1D8F6E" stroke-width="1.4"/>
+<text x="1170" y="152" font-size="14.5" font-weight="700" fill="#0B4A39" text-anchor="start" dominant-baseline="central">GPU · NVIDIA T4 16 GB (shared)</text>
+<rect x="1170" y="172" width="250" height="96" rx="10" fill="#E6F5F1" stroke="#1D8F6E" stroke-width="1.4"/>
+<text x="1295.0" y="201.875" font-size="15" font-weight="600" fill="#0B4A39" text-anchor="middle" dominant-baseline="central">DINOv2 ViT-S/14</text>
+<text x="1295.0" y="223.625" font-size="12.5" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">in-process · ONNX Runtime</text>
+<text x="1295.0" y="241.75" font-size="12.5" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">image → vector (CUDA or CPU)</text>
+<rect x="1170" y="282" width="250" height="130" rx="10" fill="#E6F5F1" stroke="#1D8F6E" stroke-width="1.4"/>
+<text x="1295.0" y="312.2" font-size="15" font-weight="600" fill="#0B4A39" text-anchor="middle" dominant-baseline="central">PaddleOCR</text>
+<text x="1295.0" y="333.95" font-size="12" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">in-process · RapidOCR on ONNX Runtime</text>
+<text x="1295.0" y="351.34999999999997" font-size="12" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">PP-OCRv6 det + rec (bundled)</text>
+<text x="1295.0" y="368.74999999999994" font-size="12" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">Arabic: PP-OCRv5 rec (optional)</text>
+<text x="1295.0" y="386.1499999999999" font-size="12" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">Tesseract = alternative engine</text>
+<rect x="1170" y="426" width="250" height="126" rx="10" fill="#E6F5F1" stroke="#1D8F6E" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="1295.0" y="461.8125" font-size="15" font-weight="600" fill="#0B4A39" text-anchor="middle" dominant-baseline="central">VLM fallback  (optional)</text>
+<text x="1295.0" y="483.5625" font-size="12.5" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">separate Ollama container</text>
+<text x="1295.0" y="501.6875" font-size="12.5" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">qwen2.5vl:7b · off by default</text>
+<text x="1295.0" y="519.8125" font-size="12.5" font-weight="400" fill="#4F7C70" text-anchor="middle" dominant-baseline="central">only unreadable fields</text>
+<rect x="1150" y="590" width="290" height="150" rx="10" fill="#F6F6F4" stroke="#7A7A74" stroke-width="1.4"/>
+<text x="1166" y="630.1999999999999" font-size="14" font-weight="600" fill="#2C2C2A" text-anchor="start" dominant-baseline="central">Qdrant v1.18.1  (API key)</text>
+<text x="1166" y="650.4999999999999" font-size="12" font-weight="400" fill="#676765" text-anchor="start" dominant-baseline="central">cardagent_refs — reference vectors</text>
+<text x="1166" y="667.8999999999999" font-size="12" font-weight="400" fill="#676765" text-anchor="start" dominant-baseline="central">cardagent_families — cards · settings</text>
+<text x="1166" y="685.2999999999998" font-size="12" font-weight="400" fill="#676765" text-anchor="start" dominant-baseline="central">cardagent_runs — history · review</text>
+<text x="1166" y="702.6999999999998" font-size="12" font-weight="400" fill="#676765" text-anchor="start" dominant-baseline="central">cardagent_evaluations</text>
+<rect x="320" y="790" width="200" height="116" rx="10" fill="#F6F6F4" stroke="#7A7A74" stroke-width="1.4"/>
+<text x="420.0" y="829.875" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">Audit log</text>
+<text x="420.0" y="851.625" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">JSON lines on stdout</text>
+<text x="420.0" y="869.75" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">PII masked</text>
+<rect x="540" y="790" width="200" height="116" rx="10" fill="#F6F6F4" stroke="#7A7A74" stroke-width="1.4"/>
+<text x="640.0" y="820.8125" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">Prometheus</text>
+<text x="640.0" y="842.5625" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">scrapes /metrics</text>
+<text x="640.0" y="860.6875" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">latency · status mix</text>
+<text x="640.0" y="878.8125" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">reason codes</text>
+<rect x="760" y="790" width="220" height="116" rx="10" fill="#F6F6F4" stroke="#7A7A74" stroke-width="1.4"/>
+<text x="870.0" y="821.9" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">File volumes</text>
+<text x="870.0" y="843.65" font-size="12" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">reference_store — ref images</text>
+<text x="870.0" y="861.05" font-size="12" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">run_store — run photos</text>
+<text x="870.0" y="878.4499999999999" font-size="12" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">evaluations — sets · reports</text>
+<rect x="1000" y="790" width="200" height="116" rx="10" fill="#EAF3FB" stroke="#2F7BBF" stroke-width="1.4"/>
+<text x="1100.0" y="821.9" font-size="15" font-weight="600" fill="#123E66" text-anchor="middle" dominant-baseline="central">registry-sync job</text>
+<text x="1100.0" y="843.65" font-size="12" font-weight="400" fill="#547490" text-anchor="middle" dominant-baseline="central">one-shot on start-up</text>
+<text x="1100.0" y="861.05" font-size="12" font-weight="400" fill="#547490" text-anchor="middle" dominant-baseline="central">validates + applies diffs</text>
+<text x="1100.0" y="878.4499999999999" font-size="12" font-weight="400" fill="#547490" text-anchor="middle" dominant-baseline="central">tools/sync_registry.py</text>
+<rect x="1240" y="790" width="200" height="116" rx="10" fill="#F6F6F4" stroke="#7A7A74" stroke-width="1.4"/>
+<text x="1340.0" y="821.9" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">registry/  (optional)</text>
+<text x="1340.0" y="843.65" font-size="12" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">cards/&lt;cc&gt;/*.yaml</text>
+<text x="1340.0" y="861.05" font-size="12" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">refs/&lt;family&gt;/&lt;variant&gt;/</text>
+<text x="1340.0" y="878.4499999999999" font-size="12" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">Git import source</text>
+<rect x="290" y="976" width="1180" height="132" rx="10" fill="#EAF3FB" stroke="#2F7BBF" stroke-width="1.4"/>
+<text x="880.0" y="1015.9000000000001" font-size="14.5" font-weight="600" fill="#123E66" text-anchor="middle" dominant-baseline="central">Change pipeline</text>
+<text x="880.0" y="1036.9250000000002" font-size="12" font-weight="400" fill="#547490" text-anchor="middle" dominant-baseline="central">Day to day: web console → PUT /v1/cards/{id} + reference uploads → stored in Qdrant → live on every worker within 5 s</text>
+<text x="880.0" y="1054.3250000000003" font-size="12" font-weight="400" fill="#547490" text-anchor="middle" dominant-baseline="central">From Git (optional): YAML + reference images → pull request → CI tools/evaluate.py (gate: ACCEPT precision ≥ 99 %) → registry-sync / POST /v1/registry/sync</text>
+<text x="880.0" y="1071.7250000000004" font-size="12" font-weight="400" fill="#547490" text-anchor="middle" dominant-baseline="central">Tuning: PATCH /v1/settings (overrides kept in Qdrant)  ·  regression check: POST /v1/evaluations  ·  rollback: re-sync previous revision or restore a Qdrant snapshot</text>
+<path d="M240 318 L318 318" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="279" y="304" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">1–2 photos</text>
+<path d="M320 344 L242 344" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="281" y="358" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">JSON</text>
+<path d="M240 470 L318 470" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="279" y="456" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">admin API</text>
+<path d="M415 520 L415 660 L242 660" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="330" y="646" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">result</text>
+<path d="M510 400 L530 400 L530 228 L573 228" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M830 284 L830 298" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M830 514 L830 530" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M1085 400 L1148 400" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="1117" y="386" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">inference</text>
+<path d="M1148 640 L1087 640" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="1117" y="626" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">snapshot</text>
+<path d="M1110 700 L1148 700" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="1129" y="714" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">writes</text>
+<path d="M560 740 L560 764 L420 764 L420 788" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M690 740 L690 788" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M870 740 L870 788" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M1238 848 L1202 848" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M1170 790 L1170 742" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="1180" y="766" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">import</text>
+<path d="M1340 976 L1340 908" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="40" y="760" font-size="13" font-weight="700" fill="#2C2C2A" text-anchor="start" dominant-baseline="central">Legend</text>
+<rect x="40" y="774" width="16" height="16" rx="4" fill="#F1EFFD" stroke="#6A5ACD" stroke-width="1.4"/>
+<text x="66" y="782" font-size="12.5" font-weight="400" fill="#44443F" text-anchor="start" dominant-baseline="central">Agent service</text>
+<rect x="40" y="800" width="16" height="16" rx="4" fill="#E6F5F1" stroke="#1D8F6E" stroke-width="1.4"/>
+<text x="66" y="808" font-size="12.5" font-weight="400" fill="#44443F" text-anchor="start" dominant-baseline="central">Model runtime (GPU)</text>
+<rect x="40" y="826" width="16" height="16" rx="4" fill="#F6F6F4" stroke="#7A7A74" stroke-width="1.4"/>
+<text x="66" y="834" font-size="12.5" font-weight="400" fill="#44443F" text-anchor="start" dominant-baseline="central">Data / ops</text>
+<rect x="40" y="852" width="16" height="16" rx="4" fill="#FFF0E3" stroke="#D9772B" stroke-width="1.4"/>
+<text x="66" y="860" font-size="12.5" font-weight="400" fill="#44443F" text-anchor="start" dominant-baseline="central">Admin / human step</text>
+<rect x="40" y="878" width="16" height="16" rx="4" fill="#EAF3FB" stroke="#2F7BBF" stroke-width="1.4"/>
+<text x="66" y="886" font-size="12.5" font-weight="400" fill="#44443F" text-anchor="start" dominant-baseline="central">Change pipeline</text>
+<rect x="40" y="904" width="16" height="16" rx="4" fill="#F4F4F2" stroke="#8A8A84" stroke-width="1.4"/>
+<text x="66" y="912" font-size="12.5" font-weight="400" fill="#44443F" text-anchor="start" dominant-baseline="central">External system</text>
+</svg>

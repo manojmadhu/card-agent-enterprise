@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="2562" viewBox="0 0 1180 2562" role="img" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
+<title>Card Validation Agent — process flow</title><desc>Per-request flow from one or two card photos to ACCEPT, REVIEW or REJECT with early exits.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9z" fill="#55554F"/></marker></defs>
+<rect width="1180" height="2562" fill="#FFFFFF"/>
+<text x="40" y="30" font-size="22" font-weight="700" fill="#1F1F1D" text-anchor="start" dominant-baseline="central">Card Validation Agent — request process flow</text>
+<text x="40" y="56" font-size="13.5" font-weight="400" fill="#6B6B66" text-anchor="start" dominant-baseline="central">1–2 photos of one card in (front / back) → one JSON decision out. Exits on the right.</text>
+<rect x="300" y="90" width="340" height="56" rx="28.0" fill="#F4F4F2" stroke="#8A8A84" stroke-width="1.4"/>
+<text x="470.0" y="108.9375" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">Photos + request_id received</text>
+<text x="470.0" y="130.6875" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">fields image | front | back | images</text>
+<path d="M470.0 146 L470.0 174" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="176" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="198.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">Upload checks</text>
+<text x="470.0" y="220.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">jpeg / png / webp · ≤ 8 MB each · ≤ 2 photos</text>
+<path d="M470.0 240 L470.0 268" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M640 208.0 L758 208.0" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="194.0" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">invalid</text>
+<rect x="760" y="172.0" width="380" height="72" rx="10" fill="#FDECEC" stroke="#C93C3C" stroke-width="1.4"/>
+<text x="950.0" y="198.9375" font-size="15" font-weight="600" fill="#7A1F1F" text-anchor="middle" dominant-baseline="central">HTTP 415 / 413 / 422</text>
+<text x="950.0" y="220.6875" font-size="12.5" font-weight="400" fill="#9F5D5D" text-anchor="middle" dominant-baseline="central">rejected before processing</text>
+<polygon points="470.0,270 650.0,324 470.0,378 290.0,324" fill="#FFF5E0" stroke="#C98A12" stroke-width="1.4"/>
+<text x="470.0" y="315" font-size="13.5" font-weight="600" fill="#6B4708" text-anchor="middle" dominant-baseline="central">same request_id + same photos?</text>
+<text x="470.0" y="333" font-size="13.5" font-weight="400" fill="#6B4708" text-anchor="middle" dominant-baseline="central">idempotency cache</text>
+<path d="M650.0 324 L758 324" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="310" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">yes</text>
+<rect x="760" y="288" width="380" height="72" rx="10" fill="#F4F4F2" stroke="#8A8A84" stroke-width="1.4"/>
+<text x="950.0" y="314.9375" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">Return cached result</text>
+<text x="950.0" y="336.6875" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">same answer for capture-system retries</text>
+<text x="484.0" y="392" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">no</text>
+<path d="M470.0 378 L470.0 406" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="408" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="430.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">1 · Quality gate  (each photo)</text>
+<text x="470.0" y="452.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">resolution · normalised sharpness · exposure · glare</text>
+<path d="M470.0 472 L470.0 500" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<polygon points="470.0,502 650.0,556 470.0,610 290.0,556" fill="#FFF5E0" stroke="#C98A12" stroke-width="1.4"/>
+<text x="470.0" y="556" font-size="13.5" font-weight="600" fill="#6B4708" text-anchor="middle" dominant-baseline="central">At least one photo usable?</text>
+<path d="M650.0 556 L758 556" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="542" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">no</text>
+<rect x="760" y="520" width="380" height="72" rx="10" fill="#FDECEC" stroke="#C93C3C" stroke-width="1.4"/>
+<text x="950.0" y="546.9375" font-size="15" font-weight="600" fill="#7A1F1F" text-anchor="middle" dominant-baseline="central">REJECT · RETAKE_REQUIRED</text>
+<text x="950.0" y="568.6875" font-size="12.5" font-weight="400" fill="#9F5D5D" text-anchor="middle" dominant-baseline="central">+ issue codes (or INVALID_IMAGE if not decodable)</text>
+<text x="484.0" y="624" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">yes</text>
+<path d="M470.0 610 L470.0 638" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="250" y1="90" x2="250" y2="610" stroke="#C9C9C3" stroke-width="2"/>
+<text x="234" y="104" font-size="14" font-weight="700" fill="#44443F" text-anchor="end" dominant-baseline="central">Intake</text>
+<text x="234" y="124" font-size="12" font-weight="400" fill="#7A7A74" text-anchor="end" dominant-baseline="central">fail fast, cheap checks</text>
+<rect x="300" y="640" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="662.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">2 · Detect &amp; straighten card  (each photo)</text>
+<text x="470.0" y="684.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">colour segmentation → edges · warp to 1012×638</text>
+<path d="M470.0 704 L470.0 732" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="734" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="756.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">3 · Full-card OCR  (each photo)</text>
+<text x="470.0" y="778.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">PaddleOCR · 0° and 180° · text pooled across photos</text>
+<path d="M470.0 798 L470.0 826" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="828" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="850.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">4 · Query features  (each photo)</text>
+<text x="470.0" y="872.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">DINOv2 vector · ORB keypoints · Lab body colour</text>
+<path d="M470.0 892 L470.0 920" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="922" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="944.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">5 · Stage 1 — shortlist (recall)</text>
+<text x="470.0" y="966.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">Qdrant top-20 references ∪ keyword inverted index</text>
+<path d="M470.0 986 L470.0 1014" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="1016" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="1038.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">6 · Stage 2 — verify (precision)</text>
+<text x="470.0" y="1060.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">ORB + RANSAC on ≤ 24 refs (front and back) → inliers</text>
+<path d="M470.0 1080 L470.0 1108" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="1110" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="1132.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">7 · Family scoring</text>
+<text x="470.0" y="1154.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">text · embedding · geometry · colour · fused over photos</text>
+<path d="M470.0 1174 L470.0 1202" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<polygon points="470.0,1204 650.0,1258 470.0,1312 290.0,1258" fill="#FFF5E0" stroke="#C98A12" stroke-width="1.4"/>
+<text x="470.0" y="1249" font-size="13.5" font-weight="600" fill="#6B4708" text-anchor="middle" dominant-baseline="central">Two photos match</text>
+<text x="470.0" y="1267" font-size="13.5" font-weight="400" fill="#6B4708" text-anchor="middle" dominant-baseline="central">two different cards?</text>
+<path d="M650.0 1258 L758 1258" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="1244" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">yes</text>
+<rect x="760" y="1222" width="380" height="72" rx="10" fill="#FFF0E3" stroke="#D9772B" stroke-width="1.4"/>
+<text x="950.0" y="1248.9375" font-size="15" font-weight="600" fill="#7A3E10" text-anchor="middle" dominant-baseline="central">REVIEW · SIDES_MISMATCH</text>
+<text x="950.0" y="1270.6875" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">each photo strongly matches another family</text>
+<text x="484.0" y="1326" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">no</text>
+<path d="M470.0 1312 L470.0 1340" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<polygon points="470.0,1342 660.0,1398 470.0,1454 280.0,1398" fill="#FFF5E0" stroke="#C98A12" stroke-width="1.4"/>
+<text x="470.0" y="1389" font-size="13.5" font-weight="600" fill="#6B4708" text-anchor="middle" dominant-baseline="central">score ≥ min AND</text>
+<text x="470.0" y="1407" font-size="13.5" font-weight="400" fill="#6B4708" text-anchor="middle" dominant-baseline="central">margin over runner-up ≥ δ?</text>
+<path d="M660.0 1398 L758 1398" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="1384" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">no</text>
+<rect x="760" y="1362" width="380" height="72" rx="10" fill="#FFF0E3" stroke="#D9772B" stroke-width="1.4"/>
+<text x="950.0" y="1388.9375" font-size="15" font-weight="600" fill="#7A3E10" text-anchor="middle" dominant-baseline="central">REVIEW · AMBIGUOUS_CARD_TYPE</text>
+<text x="950.0" y="1410.6875" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">or REJECT · UNKNOWN_CARD_TYPE if score &lt; 0.30</text>
+<text x="484.0" y="1468" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">yes</text>
+<path d="M470.0 1454 L470.0 1482" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="1484" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="1506.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">8 · Variant scoring (inside family)</text>
+<text x="470.0" y="1528.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">colour (front only) · keyword · geometry · prefix</text>
+<path d="M470.0 1548 L470.0 1576" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M640 1516.0 L758 1516.0" fill="none" stroke="#55554F" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a)"/>
+<text x="700" y="1502.0" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">tie</text>
+<rect x="760" y="1480.0" width="380" height="72" rx="10" fill="#FFF0E3" stroke="#D9772B" stroke-width="1.4"/>
+<text x="950.0" y="1506.9375" font-size="15" font-weight="600" fill="#7A3E10" text-anchor="middle" dominant-baseline="central">flag AMBIGUOUS_VARIANT</text>
+<text x="950.0" y="1528.6875" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">continue — decision becomes REVIEW</text>
+<rect x="300" y="1578" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="1600.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">9 · Assign photos to sides</text>
+<text x="470.0" y="1622.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">match to front / back references + declared side</text>
+<path d="M470.0 1642 L470.0 1670" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<path d="M640 1610.0 L758 1610.0" fill="none" stroke="#55554F" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a)"/>
+<text x="700" y="1596.0" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">side missing</text>
+<rect x="760" y="1574.0" width="380" height="72" rx="10" fill="#F4F4F2" stroke="#8A8A84" stroke-width="1.4"/>
+<text x="950.0" y="1600.9375" font-size="15" font-weight="600" fill="#2C2C2A" text-anchor="middle" dominant-baseline="central">note missing_sides</text>
+<text x="950.0" y="1622.6875" font-size="12.5" font-weight="400" fill="#676765" text-anchor="middle" dominant-baseline="central">continue — that side's fields are not read</text>
+<line x1="250" y1="640" x2="250" y2="1642" stroke="#C9C9C3" stroke-width="2"/>
+<text x="234" y="654" font-size="14" font-weight="700" fill="#44443F" text-anchor="end" dominant-baseline="central">Identify</text>
+<text x="234" y="674" font-size="12" font-weight="400" fill="#7A7A74" text-anchor="end" dominant-baseline="central">which card, tier and side?</text>
+<rect x="300" y="1672" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="1694.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">10 · Align each side to its reference</text>
+<text x="470.0" y="1716.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">RANSAC homography if inliers ≥ 25</text>
+<path d="M470.0 1736 L470.0 1764" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="1766" width="340" height="64" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="1788.9375" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">11 · Extract fields from their side</text>
+<text x="470.0" y="1810.6875" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">region OCR → full-text regex → local VLM*</text>
+<path d="M470.0 1830 L470.0 1858" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="1860" width="340" height="80" rx="10" fill="#EEF3FD" stroke="#3E6FD9" stroke-width="1.4"/>
+<text x="470.0" y="1881.875" font-size="15" font-weight="600" fill="#1B3A7A" text-anchor="middle" dominant-baseline="central">12 · Rules engine (card definition)</text>
+<text x="470.0" y="1903.625" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">regex · length · expiry · date order</text>
+<text x="470.0" y="1921.75" font-size="12.5" font-weight="400" fill="#5A719F" text-anchor="middle" dominant-baseline="central">Emirates ID · Luhn · prefix · lookup</text>
+<path d="M470.0 1940 L470.0 1968" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<line x1="250" y1="1672" x2="250" y2="1940" stroke="#C9C9C3" stroke-width="2"/>
+<text x="234" y="1686" font-size="14" font-weight="700" fill="#44443F" text-anchor="end" dominant-baseline="central">Read &amp; validate</text>
+<text x="234" y="1706" font-size="12" font-weight="400" fill="#7A7A74" text-anchor="end" dominant-baseline="central">fields + business rules</text>
+<polygon points="470.0,1970 650.0,2024 470.0,2078 290.0,2024" fill="#FFF5E0" stroke="#C98A12" stroke-width="1.4"/>
+<text x="470.0" y="2024" font-size="13.5" font-weight="600" fill="#6B4708" text-anchor="middle" dominant-baseline="central">Required side missing?</text>
+<path d="M650.0 2024 L758 2024" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="2010" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">yes</text>
+<rect x="760" y="1988" width="380" height="72" rx="10" fill="#FDECEC" stroke="#C93C3C" stroke-width="1.4"/>
+<text x="950.0" y="2014.9375" font-size="15" font-weight="600" fill="#7A1F1F" text-anchor="middle" dominant-baseline="central">REJECT · SIDE_REQUIRED:&lt;side&gt;</text>
+<text x="950.0" y="2036.6875" font-size="12.5" font-weight="400" fill="#9F5D5D" text-anchor="middle" dominant-baseline="central">+ RETAKE_REQUIRED if that side's photo was unusable</text>
+<text x="484.0" y="2092" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">no</text>
+<path d="M470.0 2078 L470.0 2106" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<polygon points="470.0,2108 650.0,2162 470.0,2216 290.0,2162" fill="#FFF5E0" stroke="#C98A12" stroke-width="1.4"/>
+<text x="470.0" y="2162" font-size="13.5" font-weight="600" fill="#6B4708" text-anchor="middle" dominant-baseline="central">Card expired?</text>
+<path d="M650.0 2162 L758 2162" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="2148" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">yes</text>
+<rect x="760" y="2126" width="380" height="72" rx="10" fill="#FDECEC" stroke="#C93C3C" stroke-width="1.4"/>
+<text x="950.0" y="2152.9375" font-size="15" font-weight="600" fill="#7A1F1F" text-anchor="middle" dominant-baseline="central">REJECT · CARD_EXPIRED</text>
+<text x="950.0" y="2174.6875" font-size="12.5" font-weight="400" fill="#9F5D5D" text-anchor="middle" dominant-baseline="central">valid_until is in the past</text>
+<text x="484.0" y="2230" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">no</text>
+<path d="M470.0 2216 L470.0 2244" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<polygon points="470.0,2246 670.0,2306 470.0,2366 270.0,2306" fill="#FFF5E0" stroke="#C98A12" stroke-width="1.4"/>
+<text x="470.0" y="2288" font-size="13.5" font-weight="600" fill="#6B4708" text-anchor="middle" dominant-baseline="central">Any open issue?</text>
+<text x="470.0" y="2306" font-size="13.5" font-weight="400" fill="#6B4708" text-anchor="middle" dominant-baseline="central">unreadable · low confidence</text>
+<text x="470.0" y="2324" font-size="13.5" font-weight="400" fill="#6B4708" text-anchor="middle" dominant-baseline="central">rule failed · ambiguous variant · VLM</text>
+<path d="M670.0 2306 L758 2306" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<text x="700" y="2292" font-size="12" font-weight="500" fill="#55554F" text-anchor="middle" dominant-baseline="central">yes</text>
+<rect x="760" y="2270" width="380" height="72" rx="10" fill="#FFF0E3" stroke="#D9772B" stroke-width="1.4"/>
+<text x="950.0" y="2296.9375" font-size="15" font-weight="600" fill="#7A3E10" text-anchor="middle" dominant-baseline="central">REVIEW + reason codes</text>
+<text x="950.0" y="2318.6875" font-size="12.5" font-weight="400" fill="#9F7452" text-anchor="middle" dominant-baseline="central">RULE_FAILED:&lt;rule&gt;:&lt;field&gt;, LOW_CONFIDENCE …</text>
+<text x="484.0" y="2380" font-size="12" font-weight="500" fill="#55554F" text-anchor="start" dominant-baseline="central">no</text>
+<path d="M470.0 2366 L470.0 2394" fill="none" stroke="#55554F" stroke-width="1.5" marker-end="url(#a)"/>
+<rect x="300" y="2396" width="340" height="56" rx="28.0" fill="#E8F6EE" stroke="#2E9D5B" stroke-width="1.4"/>
+<text x="470.0" y="2414.9375" font-size="15" font-weight="600" fill="#145234" text-anchor="middle" dominant-baseline="central">ACCEPT</text>
+<text x="470.0" y="2436.6875" font-size="12.5" font-weight="400" fill="#55826C" text-anchor="middle" dominant-baseline="central">card, variant, fields, photos and checks returned</text>
+<line x1="250" y1="1970" x2="250" y2="2452" stroke="#C9C9C3" stroke-width="2"/>
+<text x="234" y="1984" font-size="14" font-weight="700" fill="#44443F" text-anchor="end" dominant-baseline="central">Decide</text>
+<text x="234" y="2004" font-size="12" font-weight="400" fill="#7A7A74" text-anchor="end" dominant-baseline="central">status + reason codes</text>
+<text x="40" y="2492" font-size="12.5" font-weight="500" fill="#44443F" text-anchor="start" dominant-baseline="central">Every decision → JSON (schema 2.1) · run stored in Qdrant + photos in run_store (review queue, console) · PII-masked audit log · Prometheus metrics</text>
+<text x="40" y="2514" font-size="12.5" font-weight="400" fill="#44443F" text-anchor="start" dominant-baseline="central">POST /v1/cards/validate/stream runs the same flow and emits each step as a server-sent event.</text>
+<text x="40" y="2536" font-size="12" font-weight="400" fill="#7A7A74" text-anchor="start" dominant-baseline="central" font-style="italic">* VLM is optional, self-hosted (Ollama), off by default; its output is re-checked by the same regex and always triggers REVIEW.</text>
+</svg>

@@ -1,6 +1,6 @@
 """Download the PaddleOCR models that are not shipped in the rapidocr package (run once, online).
 
-  python tools/download_ocr_models.py              # Arabic recogniser (PP-OCRv5 Arabic, ~8 MB)
+  python tools/download_ocr_models.py              # Arabic recogniser (PP-OCRv5 Arabic)
   python tools/download_ocr_models.py --medium     # + PP-OCRv6 medium detection/recognition (GPU hosts)
   python tools/download_ocr_models.py --to D:\\models\\paddleocr
 

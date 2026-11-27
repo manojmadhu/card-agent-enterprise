@@ -14,7 +14,7 @@ starts empty: you add your card programmes and reference images through the API.
 ## 2. Clone
 ```powershell
 cd C:\Users\$env:USERNAME\source\repos
-git clone -b feature/qdrant-platform https://github.com/manojmadhu/card-agent-enterprise.git
+git clone -b feature/paddleocr https://github.com/manojmadhu/card-agent-enterprise.git
 cd card-agent-enterprise
 ```
 
@@ -24,7 +24,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1          # prompt now starts with (.venv)
 python -m pip install --upgrade pip
 pip install -e ".[dev]"                 # OpenCV is pinned <5; includes PaddleOCR (PP-OCRv6) via rapidocr
-python tools/download_ocr_models.py     # once: the Arabic OCR model (~8 MB, needs internet)
+python tools/download_ocr_models.py     # once: the Arabic OCR model (needs internet)
 ```
 If `Activate.ps1 cannot be loaded`: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then activate again.
 **Every new terminal:** `cd` into the project and run `.\.venv\Scripts\Activate.ps1` first.

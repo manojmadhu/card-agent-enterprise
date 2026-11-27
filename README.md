@@ -34,7 +34,7 @@ Tesseract is only needed if you choose `ocr.engine: tesseract`.
 Windows: follow [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md).
 
 ```bash
-git clone -b feature/qdrant-platform https://github.com/manojmadhu/card-agent-enterprise.git
+git clone -b feature/paddleocr https://github.com/manojmadhu/card-agent-enterprise.git
 cd card-agent-enterprise
 python3 -m venv .venv && . .venv/bin/activate        # Windows: py -3.12 -m venv .venv ; .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"                              # includes PaddleOCR (PP-OCRv6) models via rapidocr

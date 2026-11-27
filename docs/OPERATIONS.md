@@ -8,9 +8,9 @@ The T4 has 16 GB memory and compute capability 7.5 (Turing). Turing matters for 
 | Workload on one T4 | GPU memory (approx.) | Notes |
 |---|---|---|
 | DINOv2 ViT-S/14 ONNX (fp16) | < 1 GB | few ms per card |
-| PaddleOCR PP-OCRv6 det + rec, PP-OCRv5 Arabic (ONNX Runtime CUDA) | < 1 GB | the default OCR; the biggest latency win on GPU |
+| PaddleOCR PP-OCRv6 small det + rec, PP-OCRv5 Arabic (ONNX Runtime CUDA) | small (model files ~10–21 MB each, plus the CUDA runtime); not measured on a T4 yet | the default OCR; the biggest latency win on GPU |
 | Qwen2.5-VL-7B, 4-bit (Ollama/llama.cpp) | ~6–8 GB incl. image tokens/context | fallback only (a few % of cards); seconds per call |
-| **Total** | **~9–11 GB of 16 GB** | fits on one T4 with headroom |
+| **Total** | **well under 16 GB** | fits on one T4 with headroom; measure with `nvidia-smi` under load |
 
 Recommended VM sizes:
 * `Standard_NC8as_T4_v3` (8 vCPU, 56 GB RAM, 1×T4) — production start point. CPU cores matter: card
@@ -18,9 +18,10 @@ Recommended VM sizes:
 * `Standard_NC4as_T4_v3` (4 vCPU) — dev/test, or without the VLM.
 * Scale out horizontally (more VMs behind the gateway) rather than up.
 
-Measured on this repo's 2-core build box *without* GPU: p50 ≈ 1.4 s per card, of which OCR ≈ 0.95 s,
-identification ≈ 0.2 s (279 references). Re-measure on your T4 with `tools/evaluate.py` (it reports
-`timings_ms` per stage) — expect OCR to dominate unless PaddleOCR runs on the GPU.
+Measured on this repo's 2-core build box *without* GPU, PaddleOCR engine: p50 ≈ 1.3 s, p95 ≈ 3.4 s
+per request (synthetic cards, including two-photo requests); a full-card OCR pass is ~0.9 s, a field
+crop ~20 ms. Re-measure on your T4 with `tools/evaluate.py` (it reports `timings_ms` per stage) —
+expect OCR to dominate unless it runs on the GPU.
 
 **VLM serving on T4:** prefer **Ollama / llama.cpp with a 4-bit GGUF**. vLLM supports compute
 capability 7.5 but newer vLLM engines and some vision models target Ampere+; if you use vLLM, force

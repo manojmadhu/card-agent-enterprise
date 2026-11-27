@@ -38,13 +38,18 @@ embedder:
   similarity_floor: 0.60           # cosine below this counts as 0 (classic ~0.55, dinov2 ~0.60) — recalibrate on real cards
 
 ocr:
-  engine: tesseract                # tesseract | paddle
-  tesseract_lang: eng+ara
+  engine: paddle                   # paddle (PaddleOCR models on ONNX Runtime) | tesseract
+  paddle_det_model: ""             # "" = PP-OCRv6 small detection, shipped in the rapidocr package
+  paddle_rec_model: ""             # "" = PP-OCRv6 small recognition (English + Latin scripts), shipped
+  paddle_rec_keys: ""
+  paddle_rec_model_ar: models/paddleocr/arabic_PP-OCRv5_rec_mobile.onnx   # python tools/download_ocr_models.py
+  paddle_rec_keys_ar: ""
+  paddle_min_score: 0.5
+  paddle_box_thresh: 0.5
+  paddle_unclip_ratio: 1.6
+  use_gpu: false                   # true on the T4 (needs onnxruntime-gpu)
+  tesseract_lang: eng+ara          # engine: tesseract only
   tesseract_cmd: ""                # empty = find on PATH, then C:\Program Files\Tesseract-OCR (Windows)
-  paddle_det_dir: models/paddleocr/det
-  paddle_rec_dir_en: models/paddleocr/rec_en
-  paddle_rec_dir_ar: models/paddleocr/rec_ar
-  use_gpu: false
 
 retrieval:
   shortlist_refs: 20               # stage-1: nearest reference images from the vector index
@@ -73,7 +78,8 @@ scoring:
 
 quality:
   min_side: 400
-  min_blur: 60.0
+  min_sharpness: null              # null = by OCR engine (paddle 15, tesseract 80); contrast-normalised
+  min_blur: 0                      # legacy raw Laplacian variance (was 60; rejects dim photos); 0 = off
   max_glare: 0.08
   brightness_min: 0.15
   brightness_max: 0.92

@@ -80,7 +80,7 @@ for the next threshold or card change.
 | Global embedding | Classic (Lab layout + HOG), no weights | DINOv2 ViT-S/14 via ONNX Runtime (CUDA) | Apache-2.0 |
 | Vector store | Qdrant 1.18 (in-process `:memory:` for tests) | Qdrant 1.18 server (self-hosted; HNSW, filtered search, snapshots, replication) | Apache-2.0 |
 | Local features | OpenCV ORB + RANSAC | same | Apache-2.0 |
-| OCR | Tesseract 5 (eng+ara) | PaddleOCR (GPU) or Tesseract | Apache-2.0 |
+| OCR | PaddleOCR PP-OCRv6 det + rec (+ PP-OCRv5 Arabic) on ONNX Runtime, CPU | same on GPU (CUDA); Tesseract 5 as an alternative ([OCR.md](OCR.md)) | Apache-2.0 |
 | VLM fallback | off | Qwen2.5-VL-7B (4-bit) via Ollama/llama.cpp | Apache-2.0 (7B; verify model card) |
 
 ## 5. Output contract (excerpt)

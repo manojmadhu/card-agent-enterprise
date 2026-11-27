@@ -11,10 +11,10 @@ def test_view(client):
 
 def test_patch_null_and_reset(client):
     r = client.patch("/v1/settings", json={"scoring": {"family_min": 0.62, "family_margin": 0.2},
-                                           "quality": {"min_blur": 40}}, headers=ADMIN)
+                                           "quality": {"min_sharpness": 40}}, headers=ADMIN)
     assert r.status_code == 200
     s = r.json()
-    assert s["effective"]["scoring"]["family_min"] == 0.62 and s["overrides"]["quality"] == {"min_blur": 40}
+    assert s["effective"]["scoring"]["family_min"] == 0.62 and s["overrides"]["quality"] == {"min_sharpness": 40}
     assert client.get("/health/ready").json()["settings_overrides"] is True
 
     s = client.patch("/v1/settings", json={"scoring": {"family_min": None}}, headers=ADMIN).json()

@@ -8,7 +8,7 @@ starts empty: you add your card programmes and reference images through the API.
 |---|---|---|
 | Python 3.12 (64-bit) | python.org → tick **Add python.exe to PATH** | `py -3.12 --version` |
 | Git | git-scm.com | `git --version` |
-| Tesseract OCR | UB-Mannheim installer (github.com/UB-Mannheim/tesseract/wiki). During setup tick **Additional language data → Arabic**. Keep the default folder `C:\Program Files\Tesseract-OCR` (found automatically) | `& "C:\Program Files\Tesseract-OCR\tesseract.exe" --list-langs` shows `ara` and `eng` |
+| Tesseract OCR (optional) | only for `ocr.engine: tesseract`; the default OCR (PaddleOCR) is installed by pip. UB-Mannheim installer, tick **Additional language data → Arabic** | `& "C:\Program Files\Tesseract-OCR\tesseract.exe" --list-langs` |
 | Docker Desktop | docker.com (runs Qdrant) | `docker --version` |
 
 ## 2. Clone
@@ -23,7 +23,8 @@ cd card-agent-enterprise
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1          # prompt now starts with (.venv)
 python -m pip install --upgrade pip
-pip install -e ".[dev]"                 # OpenCV is pinned <5 (OpenCV 5 removed what the built-in matcher needs)
+pip install -e ".[dev]"                 # OpenCV is pinned <5; includes PaddleOCR (PP-OCRv6) via rapidocr
+python tools/download_ocr_models.py     # once: the Arabic OCR model (~8 MB, needs internet)
 ```
 If `Activate.ps1 cannot be loaded`: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then activate again.
 **Every new terminal:** `cd` into the project and run `.\.venv\Scripts\Activate.ps1` first.
@@ -85,7 +86,7 @@ Use `curl.exe`, not `curl` (in PowerShell `curl` is `Invoke-WebRequest`). All en
 ```powershell
 python -m pytest -q
 ```
-Self-contained (in-process Qdrant, built-in matcher, test cards drawn in code); expect `74 passed`.
+Self-contained (in-process Qdrant, built-in matcher, test cards drawn in code); expect `87 passed` (a few skip when Tesseract or the Arabic model is not installed).
 To run them against your Qdrant server: `$env:CARDAGENT_TEST_QDRANT_URL = "http://127.0.0.1:6333"` first
 (the tests use their own temporary collections and delete them).
 
@@ -96,8 +97,9 @@ To run them against your Qdrant server: `$env:CARDAGENT_TEST_QDRANT_URL = "http:
 | `module 'cv2' has no attribute 'HOGDescriptor'` | `pip install "opencv-python-headless>=4.9,<5"` |
 | `FileNotFoundError … dinov2_vits14.onnx` | Do step 5, or use the built-in matcher |
 | Startup error "built with embedder …" | You changed the matcher: `python tools/sync_registry.py --reembed` (re-embeds every reference) |
-| `TesseractNotFoundError` | Install Tesseract (step 1). Installed elsewhere: `$env:CARDAGENT_OCR__TESSERACT_CMD = "D:\Tools\Tesseract-OCR\tesseract.exe"` |
-| Arabic text never read | Re-run the Tesseract installer and tick Arabic language data |
+| `TesseractNotFoundError` | Only with `ocr.engine: tesseract`: install Tesseract, or set `$env:CARDAGENT_OCR__TESSERACT_CMD` |
+| Warning "Arabic OCR model not found" / Arabic text never read | `python tools/download_ocr_models.py` (once, with internet) |
+| Many `IMAGE_BLURRY` | see docs/OCR.md (quality gate) |
 | `/health/ready` 503 or connection refused `127.0.0.1:6333` | Start Docker Desktop, then `docker start cardagent-qdrant` |
 | Every card `UNKNOWN_CARD_TYPE` | No cards or no reference images yet: `curl.exe http://127.0.0.1:8080/v1/cards` |
 | Every request takes 2 s or more | The Qdrant URL says `localhost`; use `127.0.0.1` |

@@ -11,3 +11,5 @@ python-multipart>=0.0.9
 prometheus-client>=0.20
 qdrant-client==1.18.0        # keep the client minor version equal to the Qdrant server (v1.18.x)
 pytesseract>=0.3.10
+rapidocr>=3.10,<4            # PaddleOCR models (PP-OCRv6 det/rec bundled) on ONNX Runtime
+python-bidi>=0.4.2,<1        # Arabic (right-to-left) reading order for the Arabic recogniser

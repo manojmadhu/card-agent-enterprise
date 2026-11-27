@@ -1,9 +1,11 @@
-# GPU image for NVIDIA T4 (Turing, sm_75) and newer. Uses ONNX Runtime CUDA for DINOv2.
+# GPU image for NVIDIA T4 (Turing, sm_75) and newer. ONNX Runtime CUDA runs DINOv2 and the PaddleOCR
+# models (PP-OCRv6 detection/recognition shipped in the rapidocr package; the Arabic recogniser is
+# mounted from models/paddleocr, see docker-compose.yml). Tesseract stays installed as an alternative.
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 ARG PIP_INDEX_URL
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONPATH=/app/src CARDAGENT_ROOT=/app \
     HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 OMP_NUM_THREADS=4 \
-    CARDAGENT_EMBEDDER__KIND=dinov2_onnx
+    CARDAGENT_EMBEDDER__KIND=dinov2_onnx CARDAGENT_OCR__USE_GPU=true
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip tesseract-ocr tesseract-ocr-ara libgl1 libglib2.0-0 curl \
     && rm -rf /var/lib/apt/lists/*

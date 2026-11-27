@@ -13,11 +13,11 @@ dependencies = [
   "python-multipart>=0.0.9", "prometheus-client>=0.20", "qdrant-client==1.18.0",
   "pytesseract>=0.3.10",
   "onnxruntime>=1.17",
+  "rapidocr>=3.10,<4", "python-bidi>=0.4.2,<1",   # PaddleOCR models (PP-OCRv6/v5) on ONNX Runtime; RTL order
 ]
 
 [project.optional-dependencies]
 gpu = ["onnxruntime-gpu>=1.17"]          # replaces onnxruntime on GPU hosts
-paddle = ["paddleocr>=2.7", "paddlepaddle-gpu"]
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]

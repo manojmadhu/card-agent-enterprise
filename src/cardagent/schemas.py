@@ -48,7 +48,9 @@ class Candidate(BaseModel):
 class QualityInfo(BaseModel):
     width: int
     height: int
-    blur: float
+    sharpness: float | None = None     # contrast-normalised sharpness (the gate's measure)
+    min_sharpness: float | None = None # threshold it was compared with
+    blur: float                        # raw Laplacian variance (legacy measure)
     brightness: float
     glare_ratio: float
     passed: bool

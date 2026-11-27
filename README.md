@@ -9,6 +9,7 @@ fields, validates them, and returns a strict JSON decision: `ACCEPT` / `REVIEW` 
 - Deployment, GPU sizing (NVIDIA T4), card onboarding, runbook: [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - Windows step by step: [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md)
 - Cards with data on both sides (design + client/web-console specification): [docs/TWO_SIDED_CARDS.md](docs/TWO_SIDED_CARDS.md)
+- OCR engines (PaddleOCR default, Tesseract), benchmark, Arabic model: [docs/OCR.md](docs/OCR.md)
 
 ## What the platform does
 | Feature | Endpoints |
@@ -28,14 +29,16 @@ upload a few reference images per variant (and per side for two-sided cards), an
 `examples/cards/` has templates, including `two_sided/`.
 
 ## Run on a local PC
-**You need:** Python 3.10–3.12 (64-bit), Git, Tesseract OCR with English + Arabic data, Docker (for Qdrant).
+**You need:** Python 3.10–3.12 (64-bit), Git, Docker (for Qdrant). OCR is PaddleOCR (installed by pip);
+Tesseract is only needed if you choose `ocr.engine: tesseract`.
 Windows: follow [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md).
 
 ```bash
 git clone -b feature/qdrant-platform https://github.com/manojmadhu/card-agent-enterprise.git
 cd card-agent-enterprise
 python3 -m venv .venv && . .venv/bin/activate        # Windows: py -3.12 -m venv .venv ; .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"                              # + OS packages: tesseract-ocr tesseract-ocr-ara
+pip install -e ".[dev]"                              # includes PaddleOCR (PP-OCRv6) models via rapidocr
+python tools/download_ocr_models.py                  # once: the Arabic OCR model (needs internet)
 
 # Qdrant (data kept in the docker volume cardagent_qdrant)
 docker run -d --name cardagent-qdrant --restart unless-stopped \
@@ -88,8 +91,8 @@ behind its nginx image (same origin). The stream format is in `docs/API.md` §1.
 python -m pytest -q
 ```
 Self-contained: an in-process Qdrant, the built-in matcher and test cards drawn in code — no server,
-no model, no sample files. Needs Tesseract. 74 tests covering the rules, settings, CORS, two-sided cards
-and every API group.
+no model, no sample files. 87 tests covering OCR, the quality gate, rules, settings, CORS, two-sided cards
+and every API group (the Tesseract and Arabic tests skip when those are not installed).
 Against a Qdrant server instead: `CARDAGENT_TEST_QDRANT_URL=http://127.0.0.1:6333 python -m pytest -q`.
 
 ## Project layout
@@ -104,16 +107,17 @@ src/cardagent/
   evaluation.py               evaluation metrics and gate (API and CLI)
   vision/                     quality gate, card detection/warp, colour, ORB + RANSAC
   embed/                      ClassicEmbedder (no model) | Dinov2OnnxEmbedder (production)
-  ocr/                        Tesseract | PaddleOCR (local models only)
+  ocr/                        PaddleOCR models on ONNX Runtime (default) | Tesseract; local files only
   pipeline/                   identify (2-stage), extract (homography-aligned), rules, step trace (stream)
   vlm/                        self-hosted VLM fallback (Ollama / OpenAI-compatible) + circuit breaker
   observability/              metrics, JSON logs, PII masking
-tools/                        sync_registry, evaluate (CI gate), export_dinov2_onnx
+tools/                        sync_registry, evaluate (CI gate), compare_ocr, download_ocr_models, export_dinov2_onnx
 deploy/                       Dockerfile (CPU), Dockerfile.gpu (T4), docker-compose.yml (Qdrant + sync + agent + VLM)
 tests/                        self-contained test suite
 ```
 
 ## Not verified in this build environment
 - The DINOv2 ONNX path and the GPU image (no GPU or model weights here); the tests use the built-in matcher.
-- PaddleOCR engine and the VLM fallback (code paths present; need local models/endpoint).
+- Arabic reading with the PaddleOCR Arabic model (the model could not be downloaded in the build
+  environment; its test runs once the model is present) and the VLM fallback.
 - Layouts, colours and number formats in `examples/cards/` are placeholders.

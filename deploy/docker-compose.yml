@@ -43,6 +43,7 @@ services:
       - reference_store:/app/data/reference_store   # copies of reference images uploaded via the API
       - run_store:/app/data/run_store         # photos of validated cards (run history, review queue)
       - evaluations:/app/data/evaluations     # evaluation sets and reports
+      - ../models/paddleocr:/app/models/paddleocr:ro   # Arabic OCR model (python tools/download_ocr_models.py)
     ports: ["127.0.0.1:8080:8080"]           # put behind your internal gateway / mTLS
     networks: [edge, private]
     depends_on:

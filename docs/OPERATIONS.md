@@ -8,13 +8,13 @@ The T4 has 16 GB memory and compute capability 7.5 (Turing). Turing matters for 
 | Workload on one T4 | GPU memory (approx.) | Notes |
 |---|---|---|
 | DINOv2 ViT-S/14 ONNX (fp16) | < 1 GB | few ms per card |
-| PaddleOCR det + rec (en, ar) | 1–2 GB | optional; biggest latency win vs CPU Tesseract |
+| PaddleOCR PP-OCRv6 det + rec, PP-OCRv5 Arabic (ONNX Runtime CUDA) | < 1 GB | the default OCR; the biggest latency win on GPU |
 | Qwen2.5-VL-7B, 4-bit (Ollama/llama.cpp) | ~6–8 GB incl. image tokens/context | fallback only (a few % of cards); seconds per call |
 | **Total** | **~9–11 GB of 16 GB** | fits on one T4 with headroom |
 
 Recommended VM sizes:
 * `Standard_NC8as_T4_v3` (8 vCPU, 56 GB RAM, 1×T4) — production start point. CPU cores matter: card
-  detection, ORB/RANSAC and Tesseract run on CPU; 2 API workers + Ollama fit comfortably.
+  detection and ORB/RANSAC run on CPU; 2 API workers + Ollama fit comfortably.
 * `Standard_NC4as_T4_v3` (4 vCPU) — dev/test, or without the VLM.
 * Scale out horizontally (more VMs behind the gateway) rather than up.
 
@@ -32,7 +32,7 @@ capability 7.5 but newer vLLM engines and some vision models target Ampere+; if 
    `make docker` (CPU) or `make docker-gpu` (T4).
 3. Models — fetch once on a build box, verify checksums, store internally:
    * DINOv2: `python tools/export_dinov2_onnx.py --model-dir ./dinov2-small --out models/dinov2/dinov2_vits14.onnx --fp16`
-   * PaddleOCR (optional): download det/rec_en/rec_ar inference models → `models/paddleocr/...`; set `CARDAGENT_OCR__ENGINE=paddle`, `CARDAGENT_OCR__USE_GPU=true`.
+   * OCR: the PP-OCRv6 models ship in the `rapidocr` package; the Arabic model: `python tools/download_ocr_models.py` (add `--medium` for the larger PP-OCRv6 models on GPU) → `models/paddleocr/`. The GPU image sets `CARDAGENT_OCR__USE_GPU=true`. See [OCR.md](OCR.md).
    * VLM (optional): on a connected box `ollama pull qwen2.5vl:7b`, then copy the `~/.ollama/models` folder into the `ollama` volume on the T4 host. Confirm the license on the exact model card.
 4. Inference hosts get **no outbound internet route** (compose `internal: true` network; NSG deny-all egress).
 
@@ -147,7 +147,8 @@ Recommended rollout: shadow mode → assisted (staff confirm) → automatic ACCE
 | `SIDES_MISMATCH` on genuine cards | the back references are missing or show another design: check `reference_images_by_side`; raise `scoring.sides_mismatch_geometry` only after a what-if evaluation |
 | Review queue grows | `GET /v1/stats` → `top_reasons`; tune thresholds with a what-if evaluation, or add references for the family |
 | Many `AMBIGUOUS_CARD_TYPE` for two programmes | add negative keywords; add more distinctive references; check colours |
-| Many `FIELD_UNREADABLE` for one variant | ROI wrong for a new print run — fix ROI on the reference; enable PaddleOCR/VLM |
+| Many `FIELD_UNREADABLE` for one variant | ROI wrong for a new print run — fix ROI on the reference; check `ocr.engine` is `paddle`; enable the VLM |
+| Many `RETAKE_REQUIRED` + `IMAGE_BLURRY` | compare `quality.sharpness` with `quality.min_sharpness` in the results; see [OCR.md](OCR.md) |
 | VLM timeouts | circuit breaker opens automatically (decisions degrade to REVIEW); check Ollama GPU memory |
 | Latency regression | `cardagent_stage_seconds`; reduce `retrieval.max_verify_refs`; add CPU cores/workers |
 

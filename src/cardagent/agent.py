@@ -347,7 +347,7 @@ class CardAgent:
             return w
         emit("start", "quality", photo=i)
         t = time.perf_counter()
-        w.quality = quality.assess(img, s.quality)
+        w.quality = quality.assess(img, s.quality, s.ocr.engine)
         ms = stage("quality", t)
         emit("done", "quality", {"quality": w.quality, "ms": ms}, photo=i)
         if not w.quality["passed"]:

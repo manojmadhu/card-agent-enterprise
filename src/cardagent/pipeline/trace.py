@@ -154,8 +154,11 @@ class StepTrace:
     def _done_quality(self, d):
         q, c = d["quality"], self.s.quality
         checks = [
-            {"name": "sharpness (Laplacian var.)", "value": q["blur"], "op": "≥", "limit": c.min_blur,
-             "ok": q["blur"] >= c.min_blur, "code": "IMAGE_BLURRY"},
+            {"name": "sharpness (contrast-normalised)", "value": q.get("sharpness", q["blur"]), "op": "≥",
+             "limit": q.get("min_sharpness", c.min_blur), "ok": q.get("sharpness", q["blur"]) >= q.get("min_sharpness", 0),
+             "code": "IMAGE_BLURRY"},
+            *([{"name": "sharpness (raw Laplacian var.)", "value": q["blur"], "op": "≥", "limit": c.min_blur,
+                "ok": q["blur"] >= c.min_blur, "code": "IMAGE_BLURRY"}] if c.min_blur > 0 else []),
             {"name": "brightness", "value": q["brightness"], "op": "≥", "limit": c.brightness_min,
              "ok": q["brightness"] >= c.brightness_min, "code": "BAD_EXPOSURE"},
             {"name": "brightness", "value": q["brightness"], "op": "≤", "limit": c.brightness_max,

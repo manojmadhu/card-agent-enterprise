@@ -23,13 +23,21 @@ class EmbedderCfg(BaseModel):
 
 
 class OcrCfg(BaseModel):
-    engine: Literal["tesseract", "paddle"] = "tesseract"
+    engine: Literal["paddle", "tesseract"] = "paddle"
+    # paddle: PaddleOCR models on ONNX Runtime. Empty model paths = the PP-OCRv6 small models that
+    # ship inside the rapidocr package. Paths are relative to the project folder.
+    paddle_det_model: str = ""       # text detection .onnx
+    paddle_rec_model: str = ""       # Latin-script recognition .onnx (English, French, ...)
+    paddle_rec_keys: str = ""        # its character dictionary, only for models without one embedded
+    paddle_rec_model_ar: str = "models/paddleocr/arabic_PP-OCRv5_rec_mobile.onnx"   # Arabic; "" = off
+    paddle_rec_keys_ar: str = ""
+    paddle_min_score: float = Field(0.5, ge=0, le=1)     # drop recognised lines below this confidence
+    paddle_box_thresh: float = Field(0.5, ge=0, le=1)    # text detection box score
+    paddle_unclip_ratio: float = Field(1.6, gt=0)        # how far detected boxes are grown
+    use_gpu: bool = False            # CUDA through onnxruntime-gpu
+    # tesseract
     tesseract_lang: str = "eng+ara"
     tesseract_cmd: str = ""          # path to the tesseract binary; empty = PATH, then the standard install dirs
-    paddle_det_dir: str = "models/paddleocr/det"
-    paddle_rec_dir_en: str = "models/paddleocr/rec_en"
-    paddle_rec_dir_ar: str = "models/paddleocr/rec_ar"
-    use_gpu: bool = False
 
 
 class RetrievalCfg(BaseModel):
@@ -93,9 +101,16 @@ class ScoringCfg(BaseModel):
     sides_mismatch_geometry: float = 0.30
 
 
+SHARPNESS_DEFAULT = {"paddle": 15.0, "tesseract": 80.0}
+
+
 class QualityCfg(BaseModel):
     min_side: int = 400
-    min_blur: float = 60.0
+    # Sharpness = Laplacian variance of the contrast-stretched image (1st-99th percentile), so a dark or
+    # low-contrast photo is not mistaken for a blurred one. None = by OCR engine: paddle 15 (it still
+    # reads blur of sigma ~3.5), tesseract 80 (it starts misreading from sigma ~1.5).
+    min_sharpness: float | None = Field(None, ge=0)
+    min_blur: float = Field(0.0, ge=0)   # legacy raw Laplacian variance (drops with contrast); 0 = off
     max_glare: float = 0.08
     brightness_min: float = 0.15
     brightness_max: float = 0.92

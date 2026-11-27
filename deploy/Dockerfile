@@ -13,6 +13,8 @@ COPY src ./src
 COPY config ./config
 COPY registry ./registry
 COPY tools ./tools
+# OCR: PaddleOCR models on ONNX Runtime (PP-OCRv6 shipped in the rapidocr package); mount
+# models/paddleocr for the Arabic recogniser. Tesseract is installed as an alternative engine.
 RUN useradd -r -u 10001 agent && mkdir -p /app/data/reference_store /app/data/run_store /app/data/evaluations /app/models \
     && chown -R agent /app/data
 USER agent
